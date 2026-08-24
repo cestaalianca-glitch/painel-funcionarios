@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Painel de Funcionários — Cesta Aliança</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="calc.js"></script>
+<style>
+  :root {
+    --navy: #12213b; --navy-dark: #0b1526; --gold: #c9a04d; --gold-dark: #a5822f;
+    --bg: #f4f5f7; --card: #ffffff; --border: #dde1e7; --text: #1c2430; --text-soft: #667085;
+    --green: #1e7d4a; --red: #c0362c; --amber: #b5762a;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, 'Segoe UI', Arial, sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--navy); color:#fff; padding: 14px 18px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+  header h1 { font-size: 17px; margin:0; font-weight:700; }
+  header .sub { font-size:11.5px; color:#b8c1d1; }
+  nav { display:flex; gap:6px; flex-wrap:wrap; }
+  nav button { background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:7px 12px; border-radius:6px; font-size:12.5px; cursor:pointer; font-weight:600; }
+  nav button.active { background: var(--gold); border-color: var(--gold); color: var(--navy-dark); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border:1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { margin:0 0 12px 0; font-size:15px; }
+  label { display:block; font-size:11.5px; color: var(--text-soft); margin-bottom:3px; font-weight:600; }
+  input, select, textarea { width:100%; padding:8px 9px; border:1px solid var(--border); border-radius:6px; font-size:13.5px; font-family:inherit; background:#fff; color:var(--text); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(190px,1fr)); gap:10px; }
+  .field { margin-bottom:10px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
+  button.btn { background: var(--navy); color:#fff; border:none; padding:9px 14px; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
+  button.btn:hover { background: var(--navy-dark); }
+  button.btn.gold { background: var(--gold); color: var(--navy-dark); }
+  button.btn.gold:hover { background: var(--gold-dark); }
+  button.btn.danger { background: var(--red); }
+  button.btn.ghost { background:none; border:1px solid var(--border); color: var(--text); }
+  table { width:100%; border-collapse: collapse; font-size:13px; }
+  th, td { padding:7px 8px; border-bottom:1px solid var(--border); text-align:left; }
+  th { color: var(--text-soft); font-size:11px; text-transform:uppercase; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:10.5px; font-weight:700; }
+  .badge.ativo { background:#DDEBE2; color: var(--green); }
+  .badge.desligado { background:#eee; color:#666; }
+  .badge.registrado { background:#e8ecf7; color: var(--navy); }
+  .money { font-family: 'Courier New', monospace; font-weight:700; }
+  .money.pos { color: var(--green); }
+  .money.neg { color: var(--red); }
+  .hidden { display:none !important; }
+  .muted { color: var(--text-soft); font-size:12px; }
+  .emp-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border:1px solid var(--border); border-radius:8px; margin-bottom:8px; cursor:pointer; }
+  .emp-item:hover { background:#fafbfc; }
+  .emp-item .name { font-weight:700; font-size:14px; }
+  .modal-bg { position:fixed; inset:0; background:rgba(10,15,25,0.55); display:flex; align-items:center; justify-content:center; z-index:50; padding:16px; }
+  .modal { background:#fff; border-radius:10px; padding:20px; max-width:560px; width:100%; max-height:90vh; overflow-y:auto; }
+  .modal h3 { margin-top:0; }
+  .desconto-row { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .desconto-row select, .desconto-row input { flex:1; }
+  #loginScreen { display:flex; align-items:center; justify-content:center; height:100vh; }
+  #loginScreen .card { width: 300px; text-align:center; }
+  .calc-box { background:#f7f8fa; border:1px dashed var(--border); border-radius:8px; padding:10px 12px; font-size:12.5px; margin:8px 0; }
+  .calc-box div { display:flex; justify-content:space-between; padding:2px 0; }
+  .doc-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="card">
+    <h2>Painel de Funcionários</h2>
+    <p class="muted">Cesta Aliança</p>
+    <div class="field"><input type="password" id="senhaInput" placeholder="Senha de acesso"></div>
+    <button class="btn gold" style="width:100%" onclick="tentarLogin()">Entrar</button>
+    <p id="loginErro" class="muted" style="color:var(--red)"></p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div>
+      <h1>Painel de Funcionários</h1>
+      <div class="sub">Cesta Aliança</div>
+    </div>
+    <nav>
+      <button data-view="funcionarios" onclick="mudarView('funcionarios')">Funcionários</button>
+      <button data-view="fechamento" onclick="mudarView('fechamento')">Fechar Pagamento</button>
+      <button data-view="historico" onclick="mudarView('historico')">Histórico</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ===================== VIEW: FUNCIONÁRIOS ===================== -->
+    <div id="view-funcionarios">
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">Funcionários</h2>
+          <button class="btn gold" onclick="abrirFormFuncionario(null)">+ Novo funcionário</button>
+        </div>
+        <div class="row" style="margin:10px 0 4px">
+          <input id="filtroStatus" onchange="carregarFuncionarios()" style="max-width:180px" >
+        </div>
+        <div id="listaFuncionarios"></div>
+      </div>
+    </div>
+
+    <!-- ===================== VIEW: FECHAMENTO ===================== -->
+    <div id="view-fechamento" class="hidden">
+      <div class="card">
+        <h2>Fechar pagamento do mês</h2>
+        <div class="row">
+          <div class="field" style="max-width:160px"><label>Mês</label>
+            <select id="fechMes"></select>
+          </div>
+          <div class="field" style="max-width:120px"><label>Ano</label>
+            <input type="number" id="fechAno">
+          </div>
+          <button class="btn" onclick="carregarFechamentoMes()">Carregar</button>
+        </div>
+      </div>
+      <div id="listaFechamento"></div>
+    </div>
+
+    <!-- ===================== VIEW: HISTÓRICO ===================== -->
+    <div id="view-historico" class="hidden">
+      <div class="card">
+        <h2>Histórico de pagamentos</h2>
+        <div class="field" style="max-width:320px"><label>Funcionário</label>
+          <select id="histFuncionario" onchange="carregarHistorico()"></select>
+        </div>
+        <div id="listaHistorico"></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
