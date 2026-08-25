@@ -421,9 +421,10 @@ function abrirRecibo(fId, mes, ano) {
     <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
       <div class="modal" style="max-width:640px">
         <div id="reciboConteudo"></div>
-        <div class="row" style="justify-content:flex-end; margin-top:14px" class="no-print">
+        <div class="row no-print" style="justify-content:flex-end; margin-top:14px">
           <button class="btn ghost" onclick="fecharModal()">Fechar</button>
           <button class="btn ghost" onclick="window.print()">Imprimir</button>
+          <button class="btn ghost" onclick="baixarReciboExcel()">Baixar Excel</button>
           ${!jaFechado ? `<button class="btn gold" onclick="confirmarFechamentoRecibo('${fId}', ${mes}, ${ano})">Confirmar e fechar pagamento</button>` : ''}
         </div>
       </div>
@@ -532,6 +533,7 @@ function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, re
       </div>
     </div>`;
   renderReciboDescontos(f.id, descontos, readonly);
+  window._reciboAtual = { f, mes, ano, extraInfo, bruto, descontos, liquido };
 }
 function renderReciboDescontos(fId, descontos, readonly) {
   const el = document.getElementById('reciboDescontosLista');
@@ -666,11 +668,126 @@ async function abrirReciboHistorico(fechamentoId) {
     <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
       <div class="modal" style="max-width:640px">
         <div id="reciboConteudo"></div>
-        <div class="row" style="justify-content:flex-end; margin-top:14px">
+        <div class="row no-print" style="justify-content:flex-end; margin-top:14px">
           <button class="btn ghost" onclick="fecharModal()">Fechar</button>
           <button class="btn ghost" onclick="window.print()">Imprimir</button>
+          <button class="btn ghost" onclick="baixarReciboExcel()">Baixar Excel</button>
         </div>
       </div>
     </div>`;
   renderRecibo(f, existente.mes, existente.ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true);
+}
+
+// ---------- Recibo em Excel (arquivo .xlsx de verdade, formatado) ----------
+async function baixarReciboExcel() {
+  const r = window._reciboAtual;
+  if (!r) { alert('Abra um recibo primeiro.'); return; }
+  const { f, mes, ano, extraInfo, bruto, descontos, liquido } = r;
+  const totalDescontos = somaDescontos(descontos);
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Recibo', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 } });
+  ws.columns = [{ width: 10 }, { width: 40 }, { width: 14 }, { width: 16 }];
+
+  const thin = { style: 'thin', color: { argb: 'FF000000' } };
+  const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
+  const font = { name: 'Courier New', size: 10 };
+  const fontBold = { name: 'Courier New', size: 10, bold: true };
+  const moneyFmt = '"R$" #,##0.00';
+
+  function cell(addr, value, opts) {
+    const c = ws.getCell(addr);
+    c.value = value;
+    c.font = (opts && opts.bold) ? fontBold : font;
+    c.border = allBorders;
+    c.alignment = { vertical: 'middle', horizontal: (opts && opts.align) || 'left', wrapText: true };
+    if (opts && opts.money) c.numFmt = moneyFmt;
+    if (opts && opts.fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } };
+    return c;
+  }
+
+  let row = 1;
+  ws.mergeCells(`A${row}:B${row+1}`);
+  cell(`A${row}`, `${EMPRESA.nome}\nCNPJ: ${EMPRESA.cnpj}`, { bold: true });
+  cell(`C${row}`, `CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}`);
+  ws.mergeCells(`D${row}:D${row+1}`);
+  cell(`D${row}`, `Folha Mensal\n${mesNome(mes)} ${ano}`, { align: 'right' });
+  row++;
+  cell(`C${row}`, labelTipoContrato(f));
+  row += 2;
+
+  ws.mergeCells(`A${row}:D${row}`);
+  cell(`A${row}`, 'Nome do Funcionário');
+  row++;
+  ws.mergeCells(`A${row}:D${row}`);
+  cell(`A${row}`, f.nome.toUpperCase(), { bold: true });
+  row++;
+  ws.mergeCells(`A${row}:D${row}`);
+  cell(`A${row}`, f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '');
+  row += 2;
+
+  cell(`A${row}`, 'Código', { bold: true, fill: 'FFEEEEEE' });
+  cell(`B${row}`, 'Descrição', { bold: true, fill: 'FFEEEEEE' });
+  cell(`C${row}`, 'Referência', { bold: true, fill: 'FFEEEEEE' });
+  cell(`D${row}`, 'Vencimentos', { bold: true, align: 'right', fill: 'FFEEEEEE' });
+  row++;
+  const linhasVenc = f.regra_pagamento === 'comissao'
+    ? (extraInfo.formal
+        ? [['COMISSÕES', extraInfo.formal.comissaoBase], ['DSR S/ COMISSÕES', extraInfo.formal.dsr],
+           ['13º SALÁRIO PROPORCIONAL COMISSÕES', extraInfo.formal.decimoTerceiroProp],
+           ['FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.feriasProp],
+           ['1/3 FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.umTercoFeriasProp]]
+        : [['COMISSÕES', extraInfo.comissaoValorInformal]])
+    : [...(extraInfo.fixo ? [['SALÁRIO FIXO', extraInfo.fixo]] : []), ...(extraInfo.diaria ? [['DIÁRIAS TRABALHADAS', extraInfo.diaria]] : [])];
+  for (const [desc, val] of linhasVenc) {
+    cell(`A${row}`, ''); cell(`B${row}`, desc); cell(`C${row}`, ''); cell(`D${row}`, val, { align: 'right', money: true });
+    row++;
+  }
+
+  cell(`A${row}`, 'Código', { bold: true, fill: 'FFEEEEEE' });
+  cell(`B${row}`, 'Descontos', { bold: true, fill: 'FFEEEEEE' });
+  cell(`C${row}`, 'Referência', { bold: true, fill: 'FFEEEEEE' });
+  cell(`D${row}`, 'Valor', { bold: true, align: 'right', fill: 'FFEEEEEE' });
+  row++;
+  if (!descontos.length) {
+    cell(`A${row}`, ''); ws.mergeCells(`B${row}:D${row}`); cell(`B${row}`, 'Nenhum desconto lançado.');
+    row++;
+  } else {
+    for (const d of descontos) {
+      cell(`A${row}`, '');
+      cell(`B${row}`, TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : ''));
+      cell(`C${row}`, '');
+      cell(`D${row}`, d.valor, { align: 'right', money: true });
+      row++;
+    }
+  }
+
+  cell(`A${row}`, 'Observações:'); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Total de Vencimentos'); cell(`D${row}`, bruto, { align: 'right', money: true });
+  row++;
+  cell(`A${row}`, ''); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Total de Descontos'); cell(`D${row}`, totalDescontos, { align: 'right', money: true });
+  row++;
+  cell(`A${row}`, ''); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Valor Líquido', { bold: true }); cell(`D${row}`, liquido, { align: 'right', money: true, bold: true });
+  row += 2;
+
+  ws.mergeCells(`A${row}:D${row}`);
+  const semBorda = ws.getCell(`A${row}`);
+  semBorda.value = `Emitido em ${new Date().toLocaleDateString('pt-BR')}.`;
+  semBorda.font = font;
+  row += 2;
+  ws.mergeCells(`A${row}:D${row}`);
+  const assin = ws.getCell(`A${row}`);
+  assin.value = '_________________________________________\nAssinatura do funcionário';
+  assin.font = font;
+  assin.alignment = { wrapText: true };
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
