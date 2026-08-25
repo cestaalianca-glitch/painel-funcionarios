@@ -463,10 +463,15 @@ const TIPOS_DESCONTO = { vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Me
 
 const EMPRESA = {
   nome: 'L A CORREA LTDA',
-  fantasia: 'ALIANÇA CESTA BÁSICA',
   cnpj: '66.171.108/0001-55',
-  endereco: 'Av. Henrique Mansano, 1381 - Sala 02 - Santa Mônica - Londrina/PR - CEP 86.079-450',
 };
+
+function labelTipoContrato(f) {
+  if (f.regra_pagamento === 'comissao') return 'Comissionista';
+  if (f.regra_pagamento === 'fixo') return 'Mensalista';
+  if (f.regra_pagamento === 'diaria') return 'Diarista';
+  return 'Mensalista + Diária';
+}
 
 function linhasVencimentosTabela(f, extraInfo, bruto) {
   const linhas = [];
@@ -478,13 +483,13 @@ function linhasVencimentosTabela(f, extraInfo, bruto) {
       linhas.push(['FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.feriasProp]);
       linhas.push(['1/3 FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.umTercoFeriasProp]);
     } else {
-      linhas.push(['COMISSÃO (' + (extraInfo.comissaoPct||0).toFixed(2) + '% sobre recebido)', extraInfo.comissaoValorInformal]);
+      linhas.push(['COMISSÕES', extraInfo.comissaoValorInformal]);
     }
   } else {
-    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO MENSAL', extraInfo.fixo]);
+    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO', extraInfo.fixo]);
     if (extraInfo.diaria) linhas.push(['DIÁRIAS TRABALHADAS', extraInfo.diaria]);
   }
-  return linhas.map(([desc, val]) => `<tr><td>${desc}</td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
+  return linhas.map(([desc, val]) => `<tr><td class="rc-codigo"></td><td>${desc}</td><td class="rc-ref"></td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
 }
 
 function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, readonly) {
@@ -494,27 +499,32 @@ function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, re
 
   document.getElementById('reciboConteudo').innerHTML = `
     <div class="recibo-print">
-      <div class="rc-header">
-        <div class="rc-empresa">${EMPRESA.nome}</div>
-        <div>${EMPRESA.fantasia} — CNPJ: ${EMPRESA.cnpj}</div>
-        <div style="font-size:10.5px">${EMPRESA.endereco}</div>
+      <table class="rc-topo">
+        <tr>
+          <td rowspan="2" class="rc-empresa">${EMPRESA.nome}<br><span style="font-weight:400">CNPJ: ${EMPRESA.cnpj}</span></td>
+          <td>CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}</td>
+          <td rowspan="2" style="text-align:right">Folha Mensal<br>${mesNome(mes)} ${ano}</td>
+        </tr>
+        <tr><td>${labelTipoContrato(f)}</td></tr>
+      </table>
+      <div class="rc-nomefunc">
+        Nome do Funcionário<br>
+        <strong>${escapeHtml(f.nome).toUpperCase()}</strong><br>
+        ${f.regra_pagamento === 'comissao' ? 'VENDEDOR' : ''}
       </div>
-      <table class="rc-info">
-        <tr><td><strong>Funcionário:</strong> ${escapeHtml(f.nome)}${f.registrado ? ' (registrado)' : ''}</td>
-            <td style="text-align:right"><strong>Referência:</strong> ${mesNome(mes)}/${ano}</td></tr>
+      <table class="rc-tabela">
+        <thead><tr><th class="rc-codigo">Código</th><th>Descrição</th><th class="rc-ref">Referência</th><th class="rc-valor">Vencimentos</th></tr></thead>
+        <tbody>${linhasVencimentosTabela(f, extraInfo, bruto)}</tbody>
       </table>
-      <div class="rc-secao-titulo">Vencimentos</div>
-      <table class="rc-tabela"><tbody>${linhasVencimentosTabela(f, extraInfo, bruto)}</tbody></table>
-
-      <div class="rc-secao-titulo">Descontos</div>
-      <table class="rc-tabela"><tbody id="reciboDescontosLista"></tbody></table>
-
+      <table class="rc-tabela">
+        <thead><tr><th class="rc-codigo">Código</th><th>Descontos</th><th class="rc-ref">Referência</th><th class="rc-valor">Valor</th></tr></thead>
+        <tbody id="reciboDescontosLista"></tbody>
+      </table>
       <table class="rc-totais">
-        <tr><td>Total de Vencimentos</td><td class="rc-valor">${fmtMoney(bruto)}</td></tr>
-        <tr><td>Total de Descontos</td><td class="rc-valor">${fmtMoney(totalDescontos)}</td></tr>
-        <tr class="rc-liquido"><td>Valor Líquido</td><td class="rc-valor">${fmtMoney(liquido)}</td></tr>
+        <tr><td>Observações:</td><td>Total de Vencimentos</td><td class="rc-valor">${fmtMoney(bruto)}</td></tr>
+        <tr><td></td><td>Total de Descontos</td><td class="rc-valor">${fmtMoney(totalDescontos)}</td></tr>
+        <tr class="rc-liquido"><td></td><td>Valor Líquido</td><td class="rc-valor">${fmtMoney(liquido)}</td></tr>
       </table>
-
       <div class="rc-assinatura">
         Emitido em ${hoje}.<br><br>
         _________________________________________<br>
@@ -525,14 +535,18 @@ function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, re
 }
 function renderReciboDescontos(fId, descontos, readonly) {
   const el = document.getElementById('reciboDescontosLista');
-  el.innerHTML = (!descontos.length ? `<tr><td colspan="2" class="muted">Nenhum desconto lançado.</td></tr>` : '') +
+  el.innerHTML = (!descontos.length ? `<tr><td colspan="4" class="muted">Nenhum desconto lançado.</td></tr>` : '') +
     descontos.map((d, i) => `<tr>
+        <td class="rc-codigo"></td>
         <td>${TIPOS_DESCONTO[d.tipo]}${d.observacao ? ' — ' + escapeHtml(d.observacao) : ''}</td>
+        <td class="rc-ref"></td>
         <td class="rc-valor">${fmtMoney(d.valor)} ${!readonly ? `<a href="#" onclick="removerDescontoRecibo('${fId}',${i});return false;" style="margin-left:6px">x</a>` : ''}</td>
       </tr>`).join('') +
     (!readonly ? `<tr class="no-print">
+        <td class="rc-codigo"></td>
         <td><select id="novoDescTipo-${fId}">${Object.entries(TIPOS_DESCONTO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
         <input id="novoDescObs-${fId}" placeholder="Observação (opcional)" style="width:auto;display:inline-block;max-width:140px"></td>
+        <td class="rc-ref"></td>
         <td class="rc-valor"><input type="number" step="0.01" id="novoDescValor-${fId}" placeholder="Valor" style="width:90px;display:inline-block">
         <button class="btn ghost" onclick="adicionarDescontoRecibo('${fId}')">+</button></td>
       </tr>` : '');
