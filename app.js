@@ -461,6 +461,32 @@ function reconstruirExtraInfo(f, existente) {
 
 const TIPOS_DESCONTO = { vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Mercadoria', saldo_anterior:'Saldo devedor anterior', outro:'Outro' };
 
+const EMPRESA = {
+  nome: 'L A CORREA LTDA',
+  fantasia: 'ALIANÇA CESTA BÁSICA',
+  cnpj: '66.171.108/0001-55',
+  endereco: 'Av. Henrique Mansano, 1381 - Sala 02 - Santa Mônica - Londrina/PR - CEP 86.079-450',
+};
+
+function linhasVencimentosTabela(f, extraInfo, bruto) {
+  const linhas = [];
+  if (f.regra_pagamento === 'comissao') {
+    if (extraInfo.formal) {
+      linhas.push(['COMISSÕES', extraInfo.formal.comissaoBase]);
+      linhas.push(['DSR S/ COMISSÕES', extraInfo.formal.dsr]);
+      linhas.push(['13º SALÁRIO PROPORCIONAL COMISSÕES', extraInfo.formal.decimoTerceiroProp]);
+      linhas.push(['FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.feriasProp]);
+      linhas.push(['1/3 FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.umTercoFeriasProp]);
+    } else {
+      linhas.push(['COMISSÃO (' + (extraInfo.comissaoPct||0).toFixed(2) + '% sobre recebido)', extraInfo.comissaoValorInformal]);
+    }
+  } else {
+    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO MENSAL', extraInfo.fixo]);
+    if (extraInfo.diaria) linhas.push(['DIÁRIAS TRABALHADAS', extraInfo.diaria]);
+  }
+  return linhas.map(([desc, val]) => `<tr><td>${desc}</td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
+}
+
 function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, readonly) {
   const totalDescontos = somaDescontos(descontos);
   const liquido = liquidoSalvo != null ? liquidoSalvo : (bruto - totalDescontos);
@@ -468,44 +494,48 @@ function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, re
 
   document.getElementById('reciboConteudo').innerHTML = `
     <div class="recibo-print">
-      <div style="text-align:center; border-bottom:2px solid var(--navy); padding-bottom:10px; margin-bottom:10px">
-        <strong>ALIANCE COMERCIO VAREJISTA DE PRODUTOS ALIMENTICIOS E BEBIDAS LTDA</strong><br>
-        <span class="muted">CNPJ: 26.331.729/0001-34</span>
+      <div class="rc-header">
+        <div class="rc-empresa">${EMPRESA.nome}</div>
+        <div>${EMPRESA.fantasia} — CNPJ: ${EMPRESA.cnpj}</div>
+        <div style="font-size:10.5px">${EMPRESA.endereco}</div>
       </div>
-      <p><strong>Funcionário:</strong> ${escapeHtml(f.nome)} ${f.registrado ? '(registrado)' : ''}<br>
-      <strong>Referência:</strong> ${mesNome(mes)}/${ano}</p>
+      <table class="rc-info">
+        <tr><td><strong>Funcionário:</strong> ${escapeHtml(f.nome)}${f.registrado ? ' (registrado)' : ''}</td>
+            <td style="text-align:right"><strong>Referência:</strong> ${mesNome(mes)}/${ano}</td></tr>
+      </table>
+      <div class="rc-secao-titulo">Vencimentos</div>
+      <table class="rc-tabela"><tbody>${linhasVencimentosTabela(f, extraInfo, bruto)}</tbody></table>
 
-      <h3 style="margin-bottom:4px">Vencimentos</h3>
-      <div class="calc-box">${linhasVencimentos(f, extraInfo, bruto)}</div>
+      <div class="rc-secao-titulo">Descontos</div>
+      <table class="rc-tabela"><tbody id="reciboDescontosLista"></tbody></table>
 
-      <h3 style="margin-bottom:4px">Descontos</h3>
-      <div id="reciboDescontosLista"></div>
+      <table class="rc-totais">
+        <tr><td>Total de Vencimentos</td><td class="rc-valor">${fmtMoney(bruto)}</td></tr>
+        <tr><td>Total de Descontos</td><td class="rc-valor">${fmtMoney(totalDescontos)}</td></tr>
+        <tr class="rc-liquido"><td>Valor Líquido</td><td class="rc-valor">${fmtMoney(liquido)}</td></tr>
+      </table>
 
-      <div class="calc-box" style="margin-top:10px">
-        <div><span>Total Vencimentos</span><span>${fmtMoney(bruto)}</span></div>
-        <div><span>Total Descontos</span><span class="money neg">- ${fmtMoney(totalDescontos)}</span></div>
-        <div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>Valor Líquido</strong><strong class="money pos">${fmtMoney(liquido)}</strong></div>
+      <div class="rc-assinatura">
+        Emitido em ${hoje}.<br><br>
+        _________________________________________<br>
+        Assinatura do funcionário
       </div>
-
-      <p class="muted" style="margin-top:18px">Emitido em ${hoje}. &nbsp;&nbsp;&nbsp; Assinatura: _____________________________</p>
     </div>`;
   renderReciboDescontos(f.id, descontos, readonly);
 }
 function renderReciboDescontos(fId, descontos, readonly) {
   const el = document.getElementById('reciboDescontosLista');
-  el.innerHTML = (!descontos.length ? '<p class="muted">Nenhum desconto lançado.</p>' : '') +
-    descontos.map((d, i) => `<div class="desconto-row">
-        <span style="min-width:150px">${TIPOS_DESCONTO[d.tipo]}</span>
-        <span class="money neg">- ${fmtMoney(d.valor)}</span>
-        <span class="muted" style="flex:2">${escapeHtml(d.observacao||'')}</span>
-        ${!readonly ? `<button class="btn ghost" onclick="removerDescontoRecibo('${fId}',${i})">x</button>` : ''}
-      </div>`).join('') +
-    (!readonly ? `<div class="desconto-row">
-        <select id="novoDescTipo-${fId}">${Object.entries(TIPOS_DESCONTO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
-        <input type="number" step="0.01" id="novoDescValor-${fId}" placeholder="Valor">
-        <input id="novoDescObs-${fId}" placeholder="Observação (opcional)">
-        <button class="btn ghost" onclick="adicionarDescontoRecibo('${fId}')">+ Adicionar</button>
-      </div>` : '');
+  el.innerHTML = (!descontos.length ? `<tr><td colspan="2" class="muted">Nenhum desconto lançado.</td></tr>` : '') +
+    descontos.map((d, i) => `<tr>
+        <td>${TIPOS_DESCONTO[d.tipo]}${d.observacao ? ' — ' + escapeHtml(d.observacao) : ''}</td>
+        <td class="rc-valor">${fmtMoney(d.valor)} ${!readonly ? `<a href="#" onclick="removerDescontoRecibo('${fId}',${i});return false;" style="margin-left:6px">x</a>` : ''}</td>
+      </tr>`).join('') +
+    (!readonly ? `<tr class="no-print">
+        <td><select id="novoDescTipo-${fId}">${Object.entries(TIPOS_DESCONTO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+        <input id="novoDescObs-${fId}" placeholder="Observação (opcional)" style="width:auto;display:inline-block;max-width:140px"></td>
+        <td class="rc-valor"><input type="number" step="0.01" id="novoDescValor-${fId}" placeholder="Valor" style="width:90px;display:inline-block">
+        <button class="btn ghost" onclick="adicionarDescontoRecibo('${fId}')">+</button></td>
+      </tr>` : '');
 }
 function adicionarDescontoRecibo(fId) {
   const container = document.getElementById('fech-' + fId);
