@@ -304,8 +304,7 @@ async function buscarVendidoRecebido(vendedor, mes, ano) {
 
 async function renderCardFechamento(f, mes, ano, existente, container) {
   const jaFechado = existente && existente.status === 'fechado';
-  const descontosExistentes = jaFechado ? (await sb.from('rh_descontos').select('*').eq('fechamento_id', existente.id)).data || [] : [];
-  container._descontos = descontosExistentes.length ? descontosExistentes : (container._descontos || []);
+  container._existente = existente || null;
 
   let camposCalc = '';
   if (f.regra_pagamento === 'comissao') {
@@ -340,67 +339,21 @@ async function renderCardFechamento(f, mes, ano, existente, container) {
       ${jaFechado ? '<span class="badge" style="background:#DDEBE2;color:#1e7d4a">Fechado</span>' : ''}
     </div>
     <div id="calcArea-${f.id}">${camposCalc}</div>
-    <div id="descontosArea-${f.id}"></div>
     <div id="resumo-${f.id}" class="calc-box"></div>
-    ${!jaFechado ? `<div class="row" style="justify-content:flex-end">
-      <button class="btn ghost" onclick="recalcularCard('${f.id}', ${mes}, ${ano})">Recalcular</button>
-      <button class="btn gold" onclick="fecharPagamento('${f.id}', ${mes}, ${ano})">Fechar e marcar pago</button>
-    </div>` : ''}
+    <div class="row" style="justify-content:flex-end">
+      ${!jaFechado ? `<button class="btn ghost" onclick="recalcularCard('${f.id}', ${mes}, ${ano})">Recalcular</button>
+      <button class="btn gold" onclick="abrirRecibo('${f.id}', ${mes}, ${ano})">Gerar recibo e fechar pagamento</button>` : `
+      <button class="btn gold" onclick="abrirRecibo('${f.id}', ${mes}, ${ano})">Ver recibo</button>`}
+    </div>
   `;
-  renderDescontos(f.id, jaFechado);
   document.querySelectorAll(`#calcArea-${f.id} input`).forEach(inp => inp.addEventListener('input', () => recalcularCard(f.id, mes, ano)));
   recalcularCard(f.id, mes, ano);
-}
-
-function renderDescontos(fId, readonly) {
-  const container = document.getElementById('fech-' + fId);
-  const lista = container._descontos || [];
-  const el = document.getElementById('descontosArea-' + fId);
-  const tipos = { vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Mercadoria', saldo_anterior:'Saldo devedor anterior', outro:'Outro' };
-  el.innerHTML = `<label style="margin-top:8px">Descontos</label>` +
-    lista.map((d, i) => `<div class="desconto-row">
-        <span style="min-width:150px">${tipos[d.tipo]}</span>
-        <span class="money neg">- ${fmtMoney(d.valor)}</span>
-        <span class="muted" style="flex:2">${escapeHtml(d.observacao||'')}</span>
-        ${!readonly ? `<button class="btn ghost" onclick="removerDescontoLinha('${fId}',${i})">x</button>` : ''}
-      </div>`).join('') +
-    (!readonly ? `<div class="desconto-row">
-        <select id="novoDescTipo-${fId}">${Object.entries(tipos).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
-        <input type="number" step="0.01" id="novoDescValor-${fId}" placeholder="Valor">
-        <input id="novoDescObs-${fId}" placeholder="Observação (opcional)">
-        <button class="btn ghost" onclick="adicionarDescontoLinha('${fId}')">+ Adicionar</button>
-      </div>` : '');
-}
-function adicionarDescontoLinha(fId) {
-  const container = document.getElementById('fech-' + fId);
-  const tipo = document.getElementById('novoDescTipo-' + fId).value;
-  const valor = parseFloat(document.getElementById('novoDescValor-' + fId).value) || 0;
-  const observacao = document.getElementById('novoDescObs-' + fId).value.trim();
-  if (!valor) return;
-  container._descontos = container._descontos || [];
-  container._descontos.push({ tipo, valor, observacao });
-  renderDescontos(fId, false);
-  const [mes, ano] = container.dataset.mesAno ? container.dataset.mesAno.split('-') : [];
-  recalcularCardFromDom(fId);
-}
-function removerDescontoLinha(fId, idx) {
-  const container = document.getElementById('fech-' + fId);
-  container._descontos.splice(idx, 1);
-  renderDescontos(fId, false);
-  recalcularCardFromDom(fId);
-}
-function recalcularCardFromDom(fId) {
-  // Recalcula usando o mês/ano guardado no card (evita precisar repassar argumento em todo onclick).
-  const container = document.getElementById('fech-' + fId);
-  if (container && container._mes) recalcularCard(fId, container._mes, container._ano);
 }
 
 function recalcularCard(fId, mes, ano) {
   const container = document.getElementById('fech-' + fId);
   container._mes = mes; container._ano = ano;
   const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
-  const descontos = container._descontos || [];
-  const totalDescontos = somaDescontos(descontos);
   let bruto = 0, extraInfo = {};
 
   if (f.regra_pagamento === 'comissao') {
@@ -410,11 +363,14 @@ function recalcularCard(fId, mes, ano) {
     const r = calcComissaoInformal(vm1, vm2, rec);
     extraInfo = { ideal: r.ideal, atingimentoPct: r.atingimentoPct, comissaoPct: r.comissaoPct, comissaoValorInformal: r.comissaoValor, recebidoMes: rec };
     if (f.registrado) {
+      // Preview sem descontos (descontos só entram na hora do recibo) — meta = comissão informal.
       const dm = parseFloat(document.getElementById('in-dm-' + fId)?.value) || 30;
       const df = parseFloat(document.getElementById('in-df-' + fId)?.value) || 0;
-      const base = calcFormalCLTReverso(r.comissaoValor, totalDescontos, dm, df);
+      const base = calcFormalCLTReverso(r.comissaoValor, 0, dm, df);
       const formal = calcFormalCLT(base, dm, df);
       extraInfo.formal = formal;
+      extraInfo.formalDiasMes = dm;
+      extraInfo.formalDomFeriados = df;
       bruto = formal.totalVencimentos;
     } else {
       bruto = r.comissaoValor;
@@ -426,10 +382,13 @@ function recalcularCard(fId, mes, ano) {
     bruto = r.bruto;
   }
 
-  const liquido = bruto - totalDescontos;
-  container._ultimoCalc = { bruto, totalDescontos, liquido, extraInfo };
+  container._ultimoCalc = { bruto, extraInfo };
 
   const resumo = document.getElementById('resumo-' + fId);
+  resumo.innerHTML = linhasVencimentos(f, extraInfo, bruto);
+}
+
+function linhasVencimentos(f, extraInfo, bruto) {
   let linhas = '';
   if (f.regra_pagamento === 'comissao') {
     linhas += `<div><span>Ideal (média 2 meses)</span><span>${fmtMoney(extraInfo.ideal)}</span></div>`;
@@ -447,19 +406,158 @@ function recalcularCard(fId, mes, ano) {
     linhas += `<div><span>Fixo</span><span>${fmtMoney(extraInfo.fixo)}</span></div>`;
     linhas += `<div><span>Diária</span><span>${fmtMoney(extraInfo.diaria)}</span></div>`;
   }
-  linhas += `<div><strong>Bruto</strong><strong>${fmtMoney(bruto)}</strong></div>`;
-  linhas += `<div><span>Descontos</span><span class="money neg">- ${fmtMoney(totalDescontos)}</span></div>`;
-  linhas += `<div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>Líquido</strong><strong class="money pos">${fmtMoney(liquido)}</strong></div>`;
-  resumo.innerHTML = linhas;
+  linhas += `<div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>${extraInfo.formal ? 'Total Vencimentos' : 'Bruto'}</strong><strong>${fmtMoney(bruto)}</strong></div>`;
+  return linhas;
 }
 
-async function fecharPagamento(fId, mes, ano) {
+// ---------- Recibo (descontos entram aqui, e é aqui que o pagamento é fechado de fato) ----------
+function abrirRecibo(fId, mes, ano) {
+  const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
+  const container = document.getElementById('fech-' + fId);
+  const existente = container._existente;
+  const jaFechado = existente && existente.status === 'fechado';
+
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
+      <div class="modal" style="max-width:640px">
+        <div id="reciboConteudo"></div>
+        <div class="row" style="justify-content:flex-end; margin-top:14px" class="no-print">
+          <button class="btn ghost" onclick="fecharModal()">Fechar</button>
+          <button class="btn ghost" onclick="window.print()">Imprimir</button>
+          ${!jaFechado ? `<button class="btn gold" onclick="confirmarFechamentoRecibo('${fId}', ${mes}, ${ano})">Confirmar e fechar pagamento</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  if (jaFechado) {
+    carregarDescontosRecibo(fId, existente.id).then(descontos => renderRecibo(f, mes, ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true));
+  } else {
+    container._reciboDescontos = container._reciboDescontos || [];
+    renderRecibo(f, mes, ano, container._ultimoCalc.extraInfo, container._ultimoCalc.bruto, container._reciboDescontos, null, false);
+  }
+}
+async function carregarDescontosRecibo(fId, fechamentoId) {
+  const { data } = await sb.from('rh_descontos').select('*').eq('fechamento_id', fechamentoId);
+  return data || [];
+}
+function reconstruirExtraInfo(f, existente) {
+  // Reconstrói a exibição a partir do que foi salvo (pra reabrir um recibo já fechado).
+  if (f.regra_pagamento === 'comissao') {
+    const extraInfo = {
+      ideal: existente.ideal_calculado, atingimentoPct: existente.atingimento_pct,
+      comissaoPct: existente.comissao_pct, comissaoValorInformal: existente.comissao_valor,
+    };
+    if (existente.formal_total_vencimentos != null) {
+      extraInfo.formal = {
+        comissaoBase: existente.formal_valor_comissao_base, dsr: existente.formal_dsr,
+        decimoTerceiroProp: existente.formal_decimo_terceiro_prop, feriasProp: existente.formal_ferias_prop,
+        umTercoFeriasProp: existente.formal_um_terco_ferias_prop, totalVencimentos: existente.formal_total_vencimentos,
+      };
+    }
+    return extraInfo;
+  }
+  return { fixo: existente.valor_fixo_aplicado, diaria: existente.valor_diaria_aplicado };
+}
+
+const TIPOS_DESCONTO = { vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Mercadoria', saldo_anterior:'Saldo devedor anterior', outro:'Outro' };
+
+function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, readonly) {
+  const totalDescontos = somaDescontos(descontos);
+  const liquido = liquidoSalvo != null ? liquidoSalvo : (bruto - totalDescontos);
+  const hoje = new Date().toLocaleDateString('pt-BR');
+
+  document.getElementById('reciboConteudo').innerHTML = `
+    <div class="recibo-print">
+      <div style="text-align:center; border-bottom:2px solid var(--navy); padding-bottom:10px; margin-bottom:10px">
+        <strong>ALIANCE COMERCIO VAREJISTA DE PRODUTOS ALIMENTICIOS E BEBIDAS LTDA</strong><br>
+        <span class="muted">CNPJ: 26.331.729/0001-34</span>
+      </div>
+      <p><strong>Funcionário:</strong> ${escapeHtml(f.nome)} ${f.registrado ? '(registrado)' : ''}<br>
+      <strong>Referência:</strong> ${mesNome(mes)}/${ano}</p>
+
+      <h3 style="margin-bottom:4px">Vencimentos</h3>
+      <div class="calc-box">${linhasVencimentos(f, extraInfo, bruto)}</div>
+
+      <h3 style="margin-bottom:4px">Descontos</h3>
+      <div id="reciboDescontosLista"></div>
+
+      <div class="calc-box" style="margin-top:10px">
+        <div><span>Total Vencimentos</span><span>${fmtMoney(bruto)}</span></div>
+        <div><span>Total Descontos</span><span class="money neg">- ${fmtMoney(totalDescontos)}</span></div>
+        <div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>Valor Líquido</strong><strong class="money pos">${fmtMoney(liquido)}</strong></div>
+      </div>
+
+      <p class="muted" style="margin-top:18px">Emitido em ${hoje}. &nbsp;&nbsp;&nbsp; Assinatura: _____________________________</p>
+    </div>`;
+  renderReciboDescontos(f.id, descontos, readonly);
+}
+function renderReciboDescontos(fId, descontos, readonly) {
+  const el = document.getElementById('reciboDescontosLista');
+  el.innerHTML = (!descontos.length ? '<p class="muted">Nenhum desconto lançado.</p>' : '') +
+    descontos.map((d, i) => `<div class="desconto-row">
+        <span style="min-width:150px">${TIPOS_DESCONTO[d.tipo]}</span>
+        <span class="money neg">- ${fmtMoney(d.valor)}</span>
+        <span class="muted" style="flex:2">${escapeHtml(d.observacao||'')}</span>
+        ${!readonly ? `<button class="btn ghost" onclick="removerDescontoRecibo('${fId}',${i})">x</button>` : ''}
+      </div>`).join('') +
+    (!readonly ? `<div class="desconto-row">
+        <select id="novoDescTipo-${fId}">${Object.entries(TIPOS_DESCONTO).map(([k,v])=>`<option value="${k}">${v}</option>`).join('')}</select>
+        <input type="number" step="0.01" id="novoDescValor-${fId}" placeholder="Valor">
+        <input id="novoDescObs-${fId}" placeholder="Observação (opcional)">
+        <button class="btn ghost" onclick="adicionarDescontoRecibo('${fId}')">+ Adicionar</button>
+      </div>` : '');
+}
+function adicionarDescontoRecibo(fId) {
+  const container = document.getElementById('fech-' + fId);
+  const tipo = document.getElementById('novoDescTipo-' + fId).value;
+  const valor = parseFloat(document.getElementById('novoDescValor-' + fId).value) || 0;
+  const observacao = document.getElementById('novoDescObs-' + fId).value.trim();
+  if (!valor) return;
+  container._reciboDescontos.push({ tipo, valor, observacao });
+  reRenderReciboComDescontos(fId);
+}
+function removerDescontoRecibo(fId, idx) {
+  const container = document.getElementById('fech-' + fId);
+  container._reciboDescontos.splice(idx, 1);
+  reRenderReciboComDescontos(fId);
+}
+function reRenderReciboComDescontos(fId) {
+  const container = document.getElementById('fech-' + fId);
+  const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
+  let { bruto, extraInfo } = container._ultimoCalc;
+  // Pra quem tem cálculo formal (João): o total de vencimentos precisa subir junto com o
+  // desconto, pra manter o líquido final na meta calculada pela comissão informal.
+  if (extraInfo.formal) {
+    const totalDescontos = somaDescontos(container._reciboDescontos);
+    const base = calcFormalCLTReverso(extraInfo.comissaoValorInformal, totalDescontos, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
+    const formal = calcFormalCLT(base, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
+    extraInfo = { ...extraInfo, formal };
+    bruto = formal.totalVencimentos;
+  }
+  renderRecibo(f, container._mes, container._ano, extraInfo, bruto, container._reciboDescontos, null, false);
+}
+
+async function confirmarFechamentoRecibo(fId, mes, ano) {
   const container = document.getElementById('fech-' + fId);
   const calc = container._ultimoCalc;
   if (!calc) { alert('Calcule antes de fechar.'); return; }
   if (!confirm('Fechar esse pagamento e marcar como pago? Depois de fechado não dá pra editar por aqui.')) return;
   const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
-  const extra = calc.extraInfo;
+  const descontos = container._reciboDescontos || [];
+  const totalDescontos = somaDescontos(descontos);
+  let extra = calc.extraInfo;
+  let bruto = calc.bruto;
+
+  // Pra quem tem cálculo formal (João), refaz com os descontos de verdade — a base declarada
+  // muda quando existe desconto, pra ainda bater na meta de líquido calculada pela comissão informal.
+  if (extra.formal) {
+    const base = calcFormalCLTReverso(extra.comissaoValorInformal, totalDescontos, extra.formalDiasMes, extra.formalDomFeriados);
+    const formal = calcFormalCLT(base, extra.formalDiasMes, extra.formalDomFeriados);
+    extra = { ...extra, formal };
+    bruto = formal.totalVencimentos;
+  }
+  const liquido = bruto - totalDescontos;
+
   const payload = {
     funcionario_id: fId, mes, ano,
     dias_trabalhados: f.regra_pagamento !== 'comissao' ? (parseFloat(document.getElementById('in-dias-' + fId)?.value) || 0) : null,
@@ -471,23 +569,23 @@ async function fecharPagamento(fId, mes, ano) {
     comissao_pct: extra.comissaoPct ?? null,
     comissao_valor: extra.comissaoValorInformal ?? null,
     formal_valor_comissao_base: extra.formal?.comissaoBase ?? null,
-    formal_dias_mes: extra.formal ? (parseFloat(document.getElementById('in-dm-' + fId)?.value) || null) : null,
-    formal_dom_feriados: extra.formal ? (parseFloat(document.getElementById('in-df-' + fId)?.value) || null) : null,
+    formal_dias_mes: extra.formal ? extra.formalDiasMes : null,
+    formal_dom_feriados: extra.formal ? extra.formalDomFeriados : null,
     formal_dsr: extra.formal?.dsr ?? null,
     formal_decimo_terceiro_prop: extra.formal?.decimoTerceiroProp ?? null,
     formal_ferias_prop: extra.formal?.feriasProp ?? null,
     formal_um_terco_ferias_prop: extra.formal?.umTercoFeriasProp ?? null,
     formal_total_vencimentos: extra.formal?.totalVencimentos ?? null,
-    bruto: calc.bruto, total_descontos: calc.totalDescontos, liquido: calc.liquido,
+    bruto, total_descontos: totalDescontos, liquido,
     status: 'fechado', fechado_em: new Date().toISOString(),
   };
   const { data, error } = await sb.from('rh_fechamentos').upsert(payload, { onConflict: 'funcionario_id,mes,ano' }).select().single();
   if (error) { alert('Erro ao fechar: ' + error.message); return; }
-  const descontos = container._descontos || [];
   if (descontos.length) {
     const rows = descontos.map(d => ({ fechamento_id: data.id, tipo: d.tipo, valor: d.valor, observacao: d.observacao }));
     await sb.from('rh_descontos').insert(rows);
   }
+  fecharModal();
   carregarFechamentoMes();
 }
 
@@ -504,12 +602,31 @@ async function carregarHistorico() {
   const { data } = await sb.from('rh_fechamentos').select('*').eq('funcionario_id', fId).order('ano', { ascending: false }).order('mes', { ascending: false });
   const el = document.getElementById('listaHistorico');
   if (!data || !data.length) { el.innerHTML = '<p class="muted">Nenhum fechamento registrado ainda.</p>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Mês</th><th>Bruto</th><th>Descontos</th><th>Líquido</th><th>Status</th></tr></thead><tbody>` +
+  el.innerHTML = `<table><thead><tr><th>Mês</th><th>Bruto</th><th>Descontos</th><th>Líquido</th><th>Status</th><th></th></tr></thead><tbody>` +
     data.map(f => `<tr>
       <td>${mesNome(f.mes)}/${f.ano}</td>
       <td class="money">${fmtMoney(f.bruto)}</td>
       <td class="money neg">${fmtMoney(f.total_descontos)}</td>
       <td class="money pos">${fmtMoney(f.liquido)}</td>
       <td><span class="badge ${f.status==='fechado'?'ativo':'desligado'}">${f.status}</span></td>
+      <td>${f.status==='fechado' ? `<button class="btn ghost" onclick="abrirReciboHistorico('${f.id}')">Ver recibo</button>` : ''}</td>
     </tr>`).join('') + `</tbody></table>`;
+}
+
+async function abrirReciboHistorico(fechamentoId) {
+  const { data: existente, error } = await sb.from('rh_fechamentos').select('*').eq('id', fechamentoId).single();
+  if (error) { alert('Erro: ' + error.message); return; }
+  const { data: f } = await sb.from('rh_funcionarios').select('*').eq('id', existente.funcionario_id).single();
+  const descontos = await carregarDescontosRecibo(null, existente.id);
+  document.getElementById('modalRoot').innerHTML = `
+    <div class="modal-bg" onclick="if(event.target===this) fecharModal()">
+      <div class="modal" style="max-width:640px">
+        <div id="reciboConteudo"></div>
+        <div class="row" style="justify-content:flex-end; margin-top:14px">
+          <button class="btn ghost" onclick="fecharModal()">Fechar</button>
+          <button class="btn ghost" onclick="window.print()">Imprimir</button>
+        </div>
+      </div>
+    </div>`;
+  renderRecibo(f, existente.mes, existente.ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true);
 }

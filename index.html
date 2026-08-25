@@ -60,6 +60,13 @@
   .calc-box { background:#f7f8fa; border:1px dashed var(--border); border-radius:8px; padding:10px 12px; font-size:12.5px; margin:8px 0; }
   .calc-box div { display:flex; justify-content:space-between; padding:2px 0; }
   .doc-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px; }
+  @media print {
+    body * { visibility: hidden; }
+    .recibo-print, .recibo-print * { visibility: visible; }
+    .recibo-print { position: absolute; top: 0; left: 0; width: 100%; }
+    .modal-bg { position: static; background: none; }
+    .modal { box-shadow: none; max-height: none; overflow: visible; }
+  }
 </style>
 </head>
 <body>
