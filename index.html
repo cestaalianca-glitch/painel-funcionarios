@@ -68,7 +68,8 @@
   <div class="card">
     <h2>Painel de Funcionários</h2>
     <p class="muted">Cesta Aliança</p>
-    <div class="field"><input type="password" id="senhaInput" placeholder="Senha de acesso"></div>
+    <div class="field"><input type="email" id="emailInput" placeholder="E-mail"></div>
+    <div class="field"><input type="password" id="senhaInput" placeholder="Senha"></div>
     <button class="btn gold" style="width:100%" onclick="tentarLogin()">Entrar</button>
     <p id="loginErro" class="muted" style="color:var(--red)"></p>
   </div>
@@ -84,6 +85,7 @@
       <button data-view="funcionarios" onclick="mudarView('funcionarios')">Funcionários</button>
       <button data-view="fechamento" onclick="mudarView('fechamento')">Fechar Pagamento</button>
       <button data-view="historico" onclick="mudarView('historico')">Histórico</button>
+      <button onclick="sair()" style="background:rgba(255,255,255,0.05)">Sair</button>
     </nav>
   </header>
 

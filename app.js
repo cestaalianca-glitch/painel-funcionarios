@@ -4,17 +4,20 @@ const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANO
 let COMISSAO_DATA = null; // window.COMISSAO_VENDEDORES, carregado do painel principal
 let FUNCIONARIOS_CACHE = [];
 
-// ---------- Login ----------
-function tentarLogin() {
-  const v = document.getElementById('senhaInput').value;
-  if (v === window.SENHA_ACESSO) {
-    sessionStorage.setItem('rh_logado', '1');
-    iniciarApp();
-  } else {
-    document.getElementById('loginErro').textContent = 'Senha incorreta.';
+// ---------- Login (Supabase Auth — só quem tem conta criada consegue entrar) ----------
+async function tentarLogin() {
+  const email = document.getElementById('emailInput').value.trim();
+  const senha = document.getElementById('senhaInput').value;
+  document.getElementById('loginErro').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({ email, password: senha });
+  if (error) {
+    document.getElementById('loginErro').textContent = 'E-mail ou senha incorretos.';
+    return;
   }
+  iniciarApp();
 }
 document.getElementById('senhaInput').addEventListener('keydown', e => { if (e.key === 'Enter') tentarLogin(); });
+document.getElementById('emailInput').addEventListener('keydown', e => { if (e.key === 'Enter') tentarLogin(); });
 
 function iniciarApp() {
   document.getElementById('loginScreen').classList.add('hidden');
@@ -22,7 +25,10 @@ function iniciarApp() {
   carregarComissaoData();
   mudarView('funcionarios');
 }
-if (sessionStorage.getItem('rh_logado') === '1') iniciarApp();
+function sair() {
+  sb.auth.signOut().then(() => location.reload());
+}
+sb.auth.getSession().then(({ data }) => { if (data.session) iniciarApp(); });
 
 // ---------- Navegação ----------
 function mudarView(v) {
