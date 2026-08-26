@@ -678,49 +678,12 @@ async function abrirReciboHistorico(fechamentoId) {
   renderRecibo(f, existente.mes, existente.ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true);
 }
 
-// ---------- Recibo em Excel (arquivo .xlsx de verdade) ----------
+
+// ---------- Recibo em Excel (arquivo .xlsx de verdade, usando o modelo real do usuário pra todos) ----------
 async function baixarReciboExcel() {
   const r = window._reciboAtual;
   if (!r) { alert('Abra um recibo primeiro.'); return; }
-  if (r.extraInfo.formal) {
-    await baixarReciboExcelFormal(r);
-  } else {
-    await baixarReciboExcelGenerico(r);
-  }
-}
-
-// Pra quem tem cálculo formal (hoje só o João): usa o ARQUIVO DE VERDADE que o usuário mandou
-// como modelo (templates/recibo-comissao-formal-template.xlsx, já sanitizado — sem dado real de
-// ninguém), só preenchendo os campos de entrada. Fica literalmente idêntico ao original porque é
-// o mesmo arquivo, com as mesmas fórmulas/formatação — o Excel recalcula tudo sozinho ao abrir.
-async function baixarReciboExcelFormal(r) {
-  const { f, mes, ano, extraInfo, descontos } = r;
-  const res = await fetch('templates/recibo-comissao-formal-template.xlsx');
-  if (!res.ok) { alert('Não achei o modelo do recibo formal.'); return; }
-  const buf = await res.arrayBuffer();
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buf);
-
-  const dados = wb.getWorksheet('JOAO CARLOS DE QUEIROZ');
-  dados.getCell('C2').value = f.nome.toUpperCase();
-  dados.getCell('C3').value = mesNome(mes);
-  dados.getCell('C4').value = extraInfo.formal.comissaoBase;
-  dados.getCell('E3').value = ano;
-
-  // Descontos: entram como linhas extras (negativas) na mesma coluna de vencimentos do modelo
-  // (linhas 15 em diante já fazem parte da soma original do arquivo — SUM(W10:AH25)).
-  const recibo = wb.getWorksheet('Recibo de Pagamento');
-  descontos.forEach((d, i) => {
-    const linha = 15 + i;
-    if (linha > 25) return; // modelo só tem espaço até a linha 25
-    recibo.getCell('G' + linha).value = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
-    recibo.getCell('W' + linha).value = -Math.abs(d.valor);
-    recibo.getCell('W' + (linha + 36)).value = -Math.abs(d.valor); // espelha na 2ª via (linhas 46-61)
-    recibo.getCell('G' + (linha + 36)).value = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
-  });
-
-  const buffer = await wb.xlsx.writeBuffer();
-  disparaDownload(buffer, `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`);
+  await baixarReciboExcelTemplate(r);
 }
 
 function disparaDownload(buffer, nomeArquivo) {
@@ -735,107 +698,69 @@ function disparaDownload(buffer, nomeArquivo) {
   URL.revokeObjectURL(url);
 }
 
-// Pra quem NÃO tem cálculo formal (não existe um modelo de referência do usuário pra esses casos)
-// — recibo gerado do zero, seguindo o mesmo estilo visual (bordas, tabela Código/Descrição/
-// Referência/Vencimentos) do modelo original.
-async function baixarReciboExcelGenerico(r) {
-  const { f, mes, ano, extraInfo, bruto, descontos, liquido } = r;
-  const totalDescontos = somaDescontos(descontos);
-
+// Usa o ARQUIVO DE VERDADE que o usuário mandou como modelo (templates/recibo-comissao-formal-
+// template.xlsx, já sanitizado — sem dado real de ninguém) pra TODOS os funcionários, não só
+// o João. Pra quem não tem o cálculo formal (DSR/13º/férias), as linhas que não se aplicam ficam
+// zeradas/removidas e a descrição muda pro que realmente é (salário fixo, diária, comissão).
+async function baixarReciboExcelTemplate(r) {
+  const { f, mes, ano, extraInfo, bruto, descontos } = r;
+  const res = await fetch('templates/recibo-comissao-formal-template.xlsx');
+  if (!res.ok) { alert('Não achei o modelo do recibo.'); return; }
+  const buf = await res.arrayBuffer();
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('Recibo', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 } });
-  ws.columns = [{ width: 10 }, { width: 40 }, { width: 14 }, { width: 16 }];
+  await wb.xlsx.load(buf);
 
-  const thin = { style: 'thin', color: { argb: 'FF000000' } };
-  const allBorders = { top: thin, left: thin, bottom: thin, right: thin };
-  const font = { name: 'Courier New', size: 10 };
-  const fontBold = { name: 'Courier New', size: 10, bold: true };
-  const moneyFmt = '"R$" #,##0.00';
+  const dados = wb.getWorksheet('JOAO CARLOS DE QUEIROZ');
+  const recibo = wb.getWorksheet('Recibo de Pagamento');
 
-  function cell(addr, value, opts) {
-    const c = ws.getCell(addr);
-    c.value = value;
-    c.font = (opts && opts.bold) ? fontBold : font;
-    c.border = allBorders;
-    c.alignment = { vertical: 'middle', horizontal: (opts && opts.align) || 'left', wrapText: true };
-    if (opts && opts.money) c.numFmt = moneyFmt;
-    if (opts && opts.fill) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } };
-    return c;
-  }
+  dados.getCell('C2').value = f.nome.toUpperCase();
+  dados.getCell('C3').value = mesNome(mes);
+  dados.getCell('E3').value = ano;
 
-  let row = 1;
-  ws.mergeCells(`A${row}:B${row+1}`);
-  cell(`A${row}`, `${EMPRESA.nome}\nCNPJ: ${EMPRESA.cnpj}`, { bold: true });
-  cell(`C${row}`, `CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}`);
-  ws.mergeCells(`D${row}:D${row+1}`);
-  cell(`D${row}`, `Folha Mensal\n${mesNome(mes)} ${ano}`, { align: 'right' });
-  row++;
-  cell(`C${row}`, labelTipoContrato(f));
-  row += 2;
-
-  ws.mergeCells(`A${row}:D${row}`);
-  cell(`A${row}`, 'Nome do Funcionário');
-  row++;
-  ws.mergeCells(`A${row}:D${row}`);
-  cell(`A${row}`, f.nome.toUpperCase(), { bold: true });
-  row++;
-  ws.mergeCells(`A${row}:D${row}`);
-  cell(`A${row}`, f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '');
-  row += 2;
-
-  cell(`A${row}`, 'Código', { bold: true, fill: 'FFEEEEEE' });
-  cell(`B${row}`, 'Descrição', { bold: true, fill: 'FFEEEEEE' });
-  cell(`C${row}`, 'Referência', { bold: true, fill: 'FFEEEEEE' });
-  cell(`D${row}`, 'Vencimentos', { bold: true, align: 'right', fill: 'FFEEEEEE' });
-  row++;
-  const linhasVenc = f.regra_pagamento === 'comissao'
-    ? (extraInfo.formal
-        ? [['COMISSÕES', extraInfo.formal.comissaoBase], ['DSR S/ COMISSÕES', extraInfo.formal.dsr],
-           ['13º SALÁRIO PROPORCIONAL COMISSÕES', extraInfo.formal.decimoTerceiroProp],
-           ['FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.feriasProp],
-           ['1/3 FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.umTercoFeriasProp]]
-        : [['COMISSÕES', extraInfo.comissaoValorInformal]])
-    : [...(extraInfo.fixo ? [['SALÁRIO FIXO', extraInfo.fixo]] : []), ...(extraInfo.diaria ? [['DIÁRIAS TRABALHADAS', extraInfo.diaria]] : [])];
-  for (const [desc, val] of linhasVenc) {
-    cell(`A${row}`, ''); cell(`B${row}`, desc); cell(`C${row}`, ''); cell(`D${row}`, val, { align: 'right', money: true });
-    row++;
-  }
-
-  cell(`A${row}`, 'Código', { bold: true, fill: 'FFEEEEEE' });
-  cell(`B${row}`, 'Descontos', { bold: true, fill: 'FFEEEEEE' });
-  cell(`C${row}`, 'Referência', { bold: true, fill: 'FFEEEEEE' });
-  cell(`D${row}`, 'Valor', { bold: true, align: 'right', fill: 'FFEEEEEE' });
-  row++;
-  if (!descontos.length) {
-    cell(`A${row}`, ''); ws.mergeCells(`B${row}:D${row}`); cell(`B${row}`, 'Nenhum desconto lançado.');
-    row++;
+  // Linhas de vencimento (G10:G14 descrição, W10:W14 valor) — o modelo original é formulado pra
+  // comissão + encargos formais; pra quem não é essa regra, sobrescreve com valor literal e
+  // zera/renomeia o que não se aplica.
+  if (f.regra_pagamento === 'comissao' && extraInfo.formal) {
+    dados.getCell('C4').value = extraInfo.formal.comissaoBase; // resto (DSR/13º/férias) já vem certo pelas fórmulas do modelo
+  } else if (f.regra_pagamento === 'comissao') {
+    recibo.getCell('G10').value = 'COMISSÕES';
+    recibo.getCell('W10').value = extraInfo.comissaoValorInformal;
+    ['G11','G12','G13','G14'].forEach(a => recibo.getCell(a).value = '');
+    ['W11','W12','W13','W14'].forEach(a => recibo.getCell(a).value = 0);
   } else {
-    for (const d of descontos) {
-      cell(`A${row}`, '');
-      cell(`B${row}`, TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : ''));
-      cell(`C${row}`, '');
-      cell(`D${row}`, d.valor, { align: 'right', money: true });
-      row++;
-    }
+    const linhas = [];
+    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO', extraInfo.fixo]);
+    if (extraInfo.diaria) linhas.push(['DIÁRIAS TRABALHADAS', extraInfo.diaria]);
+    const linhasCells = ['10','11','12','13','14'];
+    linhasCells.forEach((n, i) => {
+      recibo.getCell('G' + n).value = linhas[i] ? linhas[i][0] : '';
+      recibo.getCell('W' + n).value = linhas[i] ? linhas[i][1] : 0;
+    });
   }
+  // Espelha a mesma coisa na 2ª via do recibo (linhas 46-50, mesmo padrão do modelo original)
+  for (let i = 0; i < 5; i++) {
+    recibo.getCell('G' + (46 + i)).value = recibo.getCell('G' + (10 + i)).value;
+    recibo.getCell('W' + (46 + i)).value = recibo.getCell('W' + (10 + i)).value;
+  }
+  recibo.getCell('J41').value = f.nome.toUpperCase();
+  recibo.getCell('J43').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
+  recibo.getCell('J7').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
+  recibo.getCell('C3').value = `CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}`;
+  recibo.getCell('C39').value = `CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}`;
+  recibo.getCell('V4').value = labelTipoContrato(f);
+  recibo.getCell('V40').value = labelTipoContrato(f);
 
-  cell(`A${row}`, 'Observações:'); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Total de Vencimentos'); cell(`D${row}`, bruto, { align: 'right', money: true });
-  row++;
-  cell(`A${row}`, ''); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Total de Descontos'); cell(`D${row}`, totalDescontos, { align: 'right', money: true });
-  row++;
-  cell(`A${row}`, ''); ws.mergeCells(`B${row}:C${row}`); cell(`B${row}`, 'Valor Líquido', { bold: true }); cell(`D${row}`, liquido, { align: 'right', money: true, bold: true });
-  row += 2;
-
-  ws.mergeCells(`A${row}:D${row}`);
-  const semBorda = ws.getCell(`A${row}`);
-  semBorda.value = `Emitido em ${new Date().toLocaleDateString('pt-BR')}.`;
-  semBorda.font = font;
-  row += 2;
-  ws.mergeCells(`A${row}:D${row}`);
-  const assin = ws.getCell(`A${row}`);
-  assin.value = '_________________________________________\nAssinatura do funcionário';
-  assin.font = font;
-  assin.alignment = { wrapText: true };
+  // Descontos: linhas extras (negativas) na mesma coluna de vencimentos (linhas 15-25 já entram
+  // na soma original do arquivo — SUM(W10:AH25) — e espelhadas na 2ª via, linhas 51-61).
+  descontos.forEach((d, i) => {
+    const linha = 15 + i;
+    if (linha > 25) return; // modelo só tem espaço até a linha 25
+    const desc = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
+    recibo.getCell('G' + linha).value = desc;
+    recibo.getCell('W' + linha).value = -Math.abs(d.valor);
+    recibo.getCell('G' + (linha + 36)).value = desc;
+    recibo.getCell('W' + (linha + 36)).value = -Math.abs(d.valor);
+  });
 
   const buffer = await wb.xlsx.writeBuffer();
   disparaDownload(buffer, `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`);
