@@ -678,10 +678,67 @@ async function abrirReciboHistorico(fechamentoId) {
   renderRecibo(f, existente.mes, existente.ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true);
 }
 
-// ---------- Recibo em Excel (arquivo .xlsx de verdade, formatado) ----------
+// ---------- Recibo em Excel (arquivo .xlsx de verdade) ----------
 async function baixarReciboExcel() {
   const r = window._reciboAtual;
   if (!r) { alert('Abra um recibo primeiro.'); return; }
+  if (r.extraInfo.formal) {
+    await baixarReciboExcelFormal(r);
+  } else {
+    await baixarReciboExcelGenerico(r);
+  }
+}
+
+// Pra quem tem cálculo formal (hoje só o João): usa o ARQUIVO DE VERDADE que o usuário mandou
+// como modelo (templates/recibo-comissao-formal-template.xlsx, já sanitizado — sem dado real de
+// ninguém), só preenchendo os campos de entrada. Fica literalmente idêntico ao original porque é
+// o mesmo arquivo, com as mesmas fórmulas/formatação — o Excel recalcula tudo sozinho ao abrir.
+async function baixarReciboExcelFormal(r) {
+  const { f, mes, ano, extraInfo, descontos } = r;
+  const res = await fetch('templates/recibo-comissao-formal-template.xlsx');
+  if (!res.ok) { alert('Não achei o modelo do recibo formal.'); return; }
+  const buf = await res.arrayBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+
+  const dados = wb.getWorksheet('JOAO CARLOS DE QUEIROZ');
+  dados.getCell('C2').value = f.nome.toUpperCase();
+  dados.getCell('C3').value = mesNome(mes);
+  dados.getCell('C4').value = extraInfo.formal.comissaoBase;
+  dados.getCell('E3').value = ano;
+
+  // Descontos: entram como linhas extras (negativas) na mesma coluna de vencimentos do modelo
+  // (linhas 15 em diante já fazem parte da soma original do arquivo — SUM(W10:AH25)).
+  const recibo = wb.getWorksheet('Recibo de Pagamento');
+  descontos.forEach((d, i) => {
+    const linha = 15 + i;
+    if (linha > 25) return; // modelo só tem espaço até a linha 25
+    recibo.getCell('G' + linha).value = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
+    recibo.getCell('W' + linha).value = -Math.abs(d.valor);
+    recibo.getCell('W' + (linha + 36)).value = -Math.abs(d.valor); // espelha na 2ª via (linhas 46-61)
+    recibo.getCell('G' + (linha + 36)).value = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  disparaDownload(buffer, `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`);
+}
+
+function disparaDownload(buffer, nomeArquivo) {
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeArquivo;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Pra quem NÃO tem cálculo formal (não existe um modelo de referência do usuário pra esses casos)
+// — recibo gerado do zero, seguindo o mesmo estilo visual (bordas, tabela Código/Descrição/
+// Referência/Vencimentos) do modelo original.
+async function baixarReciboExcelGenerico(r) {
   const { f, mes, ano, extraInfo, bruto, descontos, liquido } = r;
   const totalDescontos = somaDescontos(descontos);
 
@@ -781,13 +838,5 @@ async function baixarReciboExcel() {
   assin.alignment = { wrapText: true };
 
   const buffer = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  disparaDownload(buffer, `recibo-${f.nome.replace(/[^a-z0-9]/gi,'-')}-${mesNome(mes)}-${ano}.xlsx`);
 }
