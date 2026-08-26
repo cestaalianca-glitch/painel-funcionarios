@@ -316,20 +316,18 @@ async function renderCardFechamento(f, mes, ano, existente, container) {
         <div class="field" style="max-width:150px"><label>Vendido mês -2</label><input type="number" step="0.01" id="in-vm2-${f.id}" value="${vendidoM2.toFixed(2)}"></div>
         <div class="field" style="max-width:150px"><label>Recebido no mês</label><input type="number" step="0.01" id="in-rec-${f.id}" value="${(existente?existente.recebido_mes:recebidoMes).toFixed(2)}"></div>
       </div>`;
-    if (f.registrado) {
-      const dm = diasNoMes(ano, mes), df = contarDomingos(ano, mes);
-      camposCalc += `
-      <div class="row">
-        <div class="field" style="max-width:130px"><label>Dias no mês</label><input type="number" id="in-dm-${f.id}" value="${existente?.formal_dias_mes || dm}"></div>
-        <div class="field" style="max-width:150px"><label>Domingos+feriados</label><input type="number" step="0.5" id="in-df-${f.id}" value="${existente?.formal_dom_feriados || df}"></div>
-      </div>
-      <p class="muted">Funcionário registrado — sistema calcula os encargos formais (DSR, 13º e férias proporcionais) automaticamente.</p>`;
-    }
   } else {
     camposCalc = `<div class="row">
       <div class="field" style="max-width:150px"><label>Dias trabalhados</label><input type="number" step="0.5" id="in-dias-${f.id}" value="${existente?.dias_trabalhados ?? ''}"></div>
     </div>`;
   }
+  // Encargos formais (DSR, 13º, férias proporcionais) — agora pra todo mundo, não só registrado.
+  const dm = diasNoMes(ano, mes), df = contarDomingos(ano, mes);
+  camposCalc += `
+    <div class="row">
+      <div class="field" style="max-width:130px"><label>Dias no mês</label><input type="number" id="in-dm-${f.id}" value="${existente?.formal_dias_mes || dm}"></div>
+      <div class="field" style="max-width:150px"><label>Domingos+feriados</label><input type="number" step="0.5" id="in-df-${f.id}" value="${existente?.formal_dom_feriados || df}"></div>
+    </div>`;
 
   if (jaFechado) camposCalc = camposCalc.replace(/<input /g, '<input disabled ');
 
@@ -356,31 +354,32 @@ function recalcularCard(fId, mes, ano) {
   const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
   let bruto = 0, extraInfo = {};
 
+  let metaLiquido = 0;
   if (f.regra_pagamento === 'comissao') {
     const vm1 = parseFloat(document.getElementById('in-vm1-' + fId)?.value) || 0;
     const vm2 = parseFloat(document.getElementById('in-vm2-' + fId)?.value) || 0;
     const rec = parseFloat(document.getElementById('in-rec-' + fId)?.value) || 0;
     const r = calcComissaoInformal(vm1, vm2, rec);
     extraInfo = { ideal: r.ideal, atingimentoPct: r.atingimentoPct, comissaoPct: r.comissaoPct, comissaoValorInformal: r.comissaoValor, recebidoMes: rec };
-    if (f.registrado) {
-      // Preview sem descontos (descontos só entram na hora do recibo) — meta = comissão informal.
-      const dm = parseFloat(document.getElementById('in-dm-' + fId)?.value) || 30;
-      const df = parseFloat(document.getElementById('in-df-' + fId)?.value) || 0;
-      const base = calcFormalCLTReverso(r.comissaoValor, 0, dm, df);
-      const formal = calcFormalCLT(base, dm, df);
-      extraInfo.formal = formal;
-      extraInfo.formalDiasMes = dm;
-      extraInfo.formalDomFeriados = df;
-      bruto = formal.totalVencimentos;
-    } else {
-      bruto = r.comissaoValor;
-    }
+    metaLiquido = r.comissaoValor;
   } else {
     const dias = parseFloat(document.getElementById('in-dias-' + fId)?.value) || 0;
     const r = calcInformalFixoDiaria(f, dias);
     extraInfo = { fixo: r.fixo, diaria: r.diaria };
-    bruto = r.bruto;
+    metaLiquido = r.bruto;
   }
+
+  // Encargos formais (DSR, 13º, férias proporcionais) — pra todo mundo, com base no valor
+  // acima como "meta de líquido" (preview sem descontos — descontos só entram no recibo).
+  const dm = parseFloat(document.getElementById('in-dm-' + fId)?.value) || 30;
+  const df = parseFloat(document.getElementById('in-df-' + fId)?.value) || 0;
+  const base = calcFormalCLTReverso(metaLiquido, 0, dm, df);
+  const formal = calcFormalCLT(base, dm, df);
+  extraInfo.formal = formal;
+  extraInfo.formalDiasMes = dm;
+  extraInfo.formalDomFeriados = df;
+  extraInfo.metaLiquido = metaLiquido;
+  bruto = formal.totalVencimentos;
 
   container._ultimoCalc = { bruto, extraInfo };
 
@@ -395,18 +394,19 @@ function linhasVencimentos(f, extraInfo, bruto) {
     linhas += `<div><span>Atingimento</span><span>${(extraInfo.atingimentoPct||0).toFixed(1)}%</span></div>`;
     linhas += `<div><span>% Comissão (teto 9%)</span><span>${(extraInfo.comissaoPct||0).toFixed(2)}%</span></div>`;
     linhas += `<div><span>Comissão calculada</span><span>${fmtMoney(extraInfo.comissaoValorInformal)}</span></div>`;
-    if (extraInfo.formal) {
-      linhas += `<div><span>— Base declarada (comissão)</span><span>${fmtMoney(extraInfo.formal.comissaoBase)}</span></div>`;
-      linhas += `<div><span>— DSR s/ comissão</span><span>${fmtMoney(extraInfo.formal.dsr)}</span></div>`;
-      linhas += `<div><span>— 13º proporcional</span><span>${fmtMoney(extraInfo.formal.decimoTerceiroProp)}</span></div>`;
-      linhas += `<div><span>— Férias proporcional</span><span>${fmtMoney(extraInfo.formal.feriasProp)}</span></div>`;
-      linhas += `<div><span>— 1/3 férias proporcional</span><span>${fmtMoney(extraInfo.formal.umTercoFeriasProp)}</span></div>`;
-    }
   } else {
     linhas += `<div><span>Fixo</span><span>${fmtMoney(extraInfo.fixo)}</span></div>`;
     linhas += `<div><span>Diária</span><span>${fmtMoney(extraInfo.diaria)}</span></div>`;
   }
-  linhas += `<div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>${extraInfo.formal ? 'Total Vencimentos' : 'Bruto'}</strong><strong>${fmtMoney(bruto)}</strong></div>`;
+  if (extraInfo.formal) {
+    const label = f.regra_pagamento === 'comissao' ? 'comissão' : 'salário';
+    linhas += `<div><span>— Base declarada (${label})</span><span>${fmtMoney(extraInfo.formal.comissaoBase)}</span></div>`;
+    linhas += `<div><span>— DSR s/ ${label}</span><span>${fmtMoney(extraInfo.formal.dsr)}</span></div>`;
+    linhas += `<div><span>— 13º proporcional</span><span>${fmtMoney(extraInfo.formal.decimoTerceiroProp)}</span></div>`;
+    linhas += `<div><span>— Férias proporcional</span><span>${fmtMoney(extraInfo.formal.feriasProp)}</span></div>`;
+    linhas += `<div><span>— 1/3 férias proporcional</span><span>${fmtMoney(extraInfo.formal.umTercoFeriasProp)}</span></div>`;
+  }
+  linhas += `<div style="border-top:1px solid #ccc;padding-top:4px;margin-top:4px"><strong>Total Vencimentos</strong><strong>${fmtMoney(bruto)}</strong></div>`;
   return linhas;
 }
 
@@ -443,21 +443,20 @@ async function carregarDescontosRecibo(fId, fechamentoId) {
 }
 function reconstruirExtraInfo(f, existente) {
   // Reconstrói a exibição a partir do que foi salvo (pra reabrir um recibo já fechado).
-  if (f.regra_pagamento === 'comissao') {
-    const extraInfo = {
-      ideal: existente.ideal_calculado, atingimentoPct: existente.atingimento_pct,
-      comissaoPct: existente.comissao_pct, comissaoValorInformal: existente.comissao_valor,
+  const extraInfo = f.regra_pagamento === 'comissao'
+    ? { ideal: existente.ideal_calculado, atingimentoPct: existente.atingimento_pct,
+        comissaoPct: existente.comissao_pct, comissaoValorInformal: existente.comissao_valor }
+    : { fixo: existente.valor_fixo_aplicado, diaria: existente.valor_diaria_aplicado };
+  if (existente.formal_total_vencimentos != null) {
+    extraInfo.formal = {
+      comissaoBase: existente.formal_valor_comissao_base, dsr: existente.formal_dsr,
+      decimoTerceiroProp: existente.formal_decimo_terceiro_prop, feriasProp: existente.formal_ferias_prop,
+      umTercoFeriasProp: existente.formal_um_terco_ferias_prop, totalVencimentos: existente.formal_total_vencimentos,
     };
-    if (existente.formal_total_vencimentos != null) {
-      extraInfo.formal = {
-        comissaoBase: existente.formal_valor_comissao_base, dsr: existente.formal_dsr,
-        decimoTerceiroProp: existente.formal_decimo_terceiro_prop, feriasProp: existente.formal_ferias_prop,
-        umTercoFeriasProp: existente.formal_um_terco_ferias_prop, totalVencimentos: existente.formal_total_vencimentos,
-      };
-    }
-    return extraInfo;
+    extraInfo.formalDiasMes = existente.formal_dias_mes;
+    extraInfo.formalDomFeriados = existente.formal_dom_feriados;
   }
-  return { fixo: existente.valor_fixo_aplicado, diaria: existente.valor_diaria_aplicado };
+  return extraInfo;
 }
 
 const TIPOS_DESCONTO = { vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Mercadoria', saldo_anterior:'Saldo devedor anterior', outro:'Outro' };
@@ -475,21 +474,14 @@ function labelTipoContrato(f) {
 }
 
 function linhasVencimentosTabela(f, extraInfo, bruto) {
-  const linhas = [];
-  if (f.regra_pagamento === 'comissao') {
-    if (extraInfo.formal) {
-      linhas.push(['COMISSÕES', extraInfo.formal.comissaoBase]);
-      linhas.push(['DSR S/ COMISSÕES', extraInfo.formal.dsr]);
-      linhas.push(['13º SALÁRIO PROPORCIONAL COMISSÕES', extraInfo.formal.decimoTerceiroProp]);
-      linhas.push(['FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.feriasProp]);
-      linhas.push(['1/3 FÉRIAS PROPORCIONAIS COMISSÕES', extraInfo.formal.umTercoFeriasProp]);
-    } else {
-      linhas.push(['COMISSÕES', extraInfo.comissaoValorInformal]);
-    }
-  } else {
-    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO', extraInfo.fixo]);
-    if (extraInfo.diaria) linhas.push(['DIÁRIAS TRABALHADAS', extraInfo.diaria]);
-  }
+  const base = f.regra_pagamento === 'comissao' ? 'COMISSÕES' : 'SALÁRIO';
+  const linhas = [
+    [base, extraInfo.formal.comissaoBase],
+    [`DSR S/ ${base}`, extraInfo.formal.dsr],
+    [`13º SALÁRIO PROPORCIONAL ${base}`, extraInfo.formal.decimoTerceiroProp],
+    [`FÉRIAS PROPORCIONAIS ${base}`, extraInfo.formal.feriasProp],
+    [`1/3 FÉRIAS PROPORCIONAIS ${base}`, extraInfo.formal.umTercoFeriasProp],
+  ];
   return linhas.map(([desc, val]) => `<tr><td class="rc-codigo"></td><td>${desc}</td><td class="rc-ref"></td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
 }
 
@@ -571,15 +563,13 @@ function reRenderReciboComDescontos(fId) {
   const container = document.getElementById('fech-' + fId);
   const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
   let { bruto, extraInfo } = container._ultimoCalc;
-  // Pra quem tem cálculo formal (João): o total de vencimentos precisa subir junto com o
-  // desconto, pra manter o líquido final na meta calculada pela comissão informal.
-  if (extraInfo.formal) {
-    const totalDescontos = somaDescontos(container._reciboDescontos);
-    const base = calcFormalCLTReverso(extraInfo.comissaoValorInformal, totalDescontos, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
-    const formal = calcFormalCLT(base, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
-    extraInfo = { ...extraInfo, formal };
-    bruto = formal.totalVencimentos;
-  }
+  // O total de vencimentos precisa subir junto com o desconto, pra manter o líquido final
+  // na meta original (fixo+diária, ou comissão informal — mesma técnica pra todo mundo).
+  const totalDescontos = somaDescontos(container._reciboDescontos);
+  const base = calcFormalCLTReverso(extraInfo.metaLiquido, totalDescontos, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
+  const formal = calcFormalCLT(base, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
+  extraInfo = { ...extraInfo, formal };
+  bruto = formal.totalVencimentos;
   renderRecibo(f, container._mes, container._ano, extraInfo, bruto, container._reciboDescontos, null, false);
 }
 
@@ -592,16 +582,12 @@ async function confirmarFechamentoRecibo(fId, mes, ano) {
   const descontos = container._reciboDescontos || [];
   const totalDescontos = somaDescontos(descontos);
   let extra = calc.extraInfo;
-  let bruto = calc.bruto;
-
-  // Pra quem tem cálculo formal (João), refaz com os descontos de verdade — a base declarada
-  // muda quando existe desconto, pra ainda bater na meta de líquido calculada pela comissão informal.
-  if (extra.formal) {
-    const base = calcFormalCLTReverso(extra.comissaoValorInformal, totalDescontos, extra.formalDiasMes, extra.formalDomFeriados);
-    const formal = calcFormalCLT(base, extra.formalDiasMes, extra.formalDomFeriados);
-    extra = { ...extra, formal };
-    bruto = formal.totalVencimentos;
-  }
+  // Refaz com os descontos de verdade — a base declarada muda quando existe desconto, pra
+  // ainda bater na meta de líquido original (mesma técnica pra todo mundo).
+  const baseCLT = calcFormalCLTReverso(extra.metaLiquido, totalDescontos, extra.formalDiasMes, extra.formalDomFeriados);
+  const formal = calcFormalCLT(baseCLT, extra.formalDiasMes, extra.formalDomFeriados);
+  extra = { ...extra, formal };
+  const bruto = formal.totalVencimentos;
   const liquido = bruto - totalDescontos;
 
   const payload = {
@@ -717,31 +703,18 @@ async function baixarReciboExcelTemplate(r) {
   dados.getCell('C3').value = mesNome(mes);
   dados.getCell('E3').value = ano;
 
-  // Linhas de vencimento (G10:G14 descrição, W10:W14 valor) — o modelo original é formulado pra
-  // comissão + encargos formais; pra quem não é essa regra, sobrescreve com valor literal e
-  // zera/renomeia o que não se aplica.
-  if (f.regra_pagamento === 'comissao' && extraInfo.formal) {
-    dados.getCell('C4').value = extraInfo.formal.comissaoBase; // resto (DSR/13º/férias) já vem certo pelas fórmulas do modelo
-  } else if (f.regra_pagamento === 'comissao') {
-    recibo.getCell('G10').value = 'COMISSÕES';
-    recibo.getCell('W10').value = extraInfo.comissaoValorInformal;
-    ['G11','G12','G13','G14'].forEach(a => recibo.getCell(a).value = '');
-    ['W11','W12','W13','W14'].forEach(a => recibo.getCell(a).value = 0);
-  } else {
-    const linhas = [];
-    if (extraInfo.fixo) linhas.push(['SALÁRIO FIXO', extraInfo.fixo]);
-    if (extraInfo.diaria) linhas.push(['DIÁRIAS TRABALHADAS', extraInfo.diaria]);
-    const linhasCells = ['10','11','12','13','14'];
-    linhasCells.forEach((n, i) => {
-      recibo.getCell('G' + n).value = linhas[i] ? linhas[i][0] : '';
-      recibo.getCell('W' + n).value = linhas[i] ? linhas[i][1] : 0;
-    });
+  // Linhas de vencimento (G10:G14 descrição, W10:W14 valor) — o modelo original já é formulado
+  // pra calcular DSR/13º/férias a partir de C4; agora isso vale pra todo mundo, só troca o rótulo
+  // "COMISSÕES" por "SALÁRIO" quando não é comissão.
+  dados.getCell('C4').value = extraInfo.formal.comissaoBase;
+  if (f.regra_pagamento !== 'comissao') {
+    ['G10','G46'].forEach(a => recibo.getCell(a).value = 'SALÁRIO');
+    ['G11','G47'].forEach(a => recibo.getCell(a).value = 'DSR S/ SALÁRIO');
+    ['G12','G48'].forEach(a => recibo.getCell(a).value = '13º SALÁRIO PROPORCIONAL');
+    ['G13','G49'].forEach(a => recibo.getCell(a).value = 'FÉRIAS PROPORCIONAIS');
+    ['G14','G50'].forEach(a => recibo.getCell(a).value = '1/3 FÉRIAS PROPORCIONAIS');
   }
-  // Espelha a mesma coisa na 2ª via do recibo (linhas 46-50, mesmo padrão do modelo original)
-  for (let i = 0; i < 5; i++) {
-    recibo.getCell('G' + (46 + i)).value = recibo.getCell('G' + (10 + i)).value;
-    recibo.getCell('W' + (46 + i)).value = recibo.getCell('W' + (10 + i)).value;
-  }
+  // (W46:W50 já são fórmulas do modelo original que puxam de W10:W14 — não precisa mexer)
   recibo.getCell('J41').value = f.nome.toUpperCase();
   recibo.getCell('J43').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
   recibo.getCell('J7').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
