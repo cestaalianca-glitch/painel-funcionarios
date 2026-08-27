@@ -108,6 +108,7 @@
     </div>
     <nav>
       <button data-view="funcionarios" onclick="mudarView('funcionarios')">Funcionários</button>
+      <button data-view="lancamentos" onclick="mudarView('lancamentos')">Lançamentos</button>
       <button data-view="fechamento" onclick="mudarView('fechamento')">Fechar Pagamento</button>
       <button data-view="historico" onclick="mudarView('historico')">Histórico</button>
       <button onclick="sair()" style="background:rgba(255,255,255,0.05)">Sair</button>
@@ -126,6 +127,46 @@
           <input id="filtroStatus" onchange="carregarFuncionarios()" style="max-width:180px" >
         </div>
         <div id="listaFuncionarios"></div>
+      </div>
+    </div>
+
+    <!-- ===================== VIEW: LANÇAMENTOS ===================== -->
+    <div id="view-lancamentos" class="hidden">
+      <div class="card">
+        <h2>Lançar vale, falta, desconto ou dia de VR</h2>
+        <div class="row">
+          <div class="field" style="max-width:220px"><label>Funcionário</label>
+            <select id="lancFuncionario"></select>
+          </div>
+          <div class="field" style="max-width:170px"><label>Tipo</label>
+            <select id="lancTipo" onchange="atualizarCampoValorLancamento()">
+              <option value="vr">VR pago (dia trabalhado)</option>
+              <option value="vale">Vale/Adiantamento</option>
+              <option value="falta">Falta</option>
+              <option value="mercadoria">Mercadoria</option>
+              <option value="saldo_anterior">Saldo devedor anterior</option>
+              <option value="outro">Outro</option>
+            </select>
+          </div>
+          <div class="field" style="max-width:150px"><label>Data</label>
+            <input type="date" id="lancData">
+          </div>
+          <div class="field" id="wrapLancValor" style="max-width:130px"><label>Valor</label>
+            <input type="number" step="0.01" id="lancValor">
+          </div>
+        </div>
+        <div class="field"><label>Observação (opcional)</label><input id="lancObs"></div>
+        <button class="btn gold" onclick="salvarLancamento()">+ Lançar</button>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0">Lançamentos do mês</h2>
+          <div class="row">
+            <select id="lancMesFiltro" style="max-width:150px" onchange="carregarLancamentos()"></select>
+            <input type="number" id="lancAnoFiltro" style="max-width:100px" onchange="carregarLancamentos()">
+          </div>
+        </div>
+        <div id="listaLancamentos"></div>
       </div>
     </div>
 

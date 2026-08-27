@@ -32,13 +32,85 @@ sb.auth.getSession().then(({ data }) => { if (data.session) iniciarApp(); });
 
 // ---------- Navegação ----------
 function mudarView(v) {
-  ['funcionarios','fechamento','historico'].forEach(id => {
+  ['funcionarios','lancamentos','fechamento','historico'].forEach(id => {
     document.getElementById('view-' + id).classList.toggle('hidden', id !== v);
   });
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
   if (v === 'funcionarios') carregarFuncionarios();
+  if (v === 'lancamentos') iniciarLancamentosDefault();
   if (v === 'fechamento') iniciarFechamentoDefault();
   if (v === 'historico') carregarSelectHistFuncionario();
+}
+
+// ---------- Lançamentos (vale, falta, mercadoria, VR — registrados no dia a dia) ----------
+async function iniciarLancamentosDefault() {
+  const { data } = await sb.from('rh_funcionarios').select('id,nome').eq('status','ativo').order('nome');
+  const sel = document.getElementById('lancFuncionario');
+  sel.innerHTML = (data || []).map(f => `<option value="${f.id}">${escapeHtml(f.nome)}</option>`).join('');
+
+  const selMes = document.getElementById('lancMesFiltro');
+  if (!selMes.options.length) {
+    for (let m = 1; m <= 12; m++) selMes.innerHTML += `<option value="${m}">${mesNome(m)}</option>`;
+  }
+  const hoje = new Date();
+  document.getElementById('lancData').value = hoje.toISOString().slice(0,10);
+  selMes.value = hoje.getMonth() + 1;
+  document.getElementById('lancAnoFiltro').value = hoje.getFullYear();
+  atualizarCampoValorLancamento();
+  carregarLancamentos();
+}
+function atualizarCampoValorLancamento() {
+  const tipo = document.getElementById('lancTipo').value;
+  document.getElementById('wrapLancValor').classList.toggle('hidden', tipo === 'vr');
+}
+async function salvarLancamento() {
+  const funcionario_id = document.getElementById('lancFuncionario').value;
+  const tipo = document.getElementById('lancTipo').value;
+  const data = document.getElementById('lancData').value;
+  const observacao = document.getElementById('lancObs').value.trim();
+  if (!funcionario_id || !data) { alert('Escolha o funcionário e a data.'); return; }
+  let valor = null;
+  if (tipo === 'vr') {
+    const f = (await sb.from('rh_funcionarios').select('valor_diaria').eq('id', funcionario_id).single()).data;
+    valor = f?.valor_diaria || 25;
+  } else {
+    valor = parseFloat(document.getElementById('lancValor').value) || 0;
+    if (!valor) { alert('Informe o valor.'); return; }
+  }
+  const { error } = await sb.from('rh_lancamentos').insert({ funcionario_id, tipo, data, valor, observacao });
+  if (error) { alert('Erro ao lançar: ' + error.message); return; }
+  document.getElementById('lancObs').value = '';
+  document.getElementById('lancValor').value = '';
+  carregarLancamentos();
+}
+async function carregarLancamentos() {
+  const mes = parseInt(document.getElementById('lancMesFiltro').value, 10);
+  const ano = parseInt(document.getElementById('lancAnoFiltro').value, 10);
+  if (!mes || !ano) return;
+  const ini = `${ano}-${String(mes).padStart(2,'0')}-01`;
+  const fim = `${ano}-${String(mes).padStart(2,'0')}-31`;
+  const { data, error } = await sb.from('rh_lancamentos')
+    .select('*, rh_funcionarios(nome)')
+    .gte('data', ini).lte('data', fim)
+    .order('data', { ascending: false });
+  const el = document.getElementById('listaLancamentos');
+  if (error) { el.innerHTML = '<p class="muted">Erro: ' + escapeHtml(error.message) + '</p>'; return; }
+  if (!data || !data.length) { el.innerHTML = '<p class="muted">Nenhum lançamento nesse mês ainda.</p>'; return; }
+  const tipos = { vr:'VR pago', vale:'Vale/Adiantamento', falta:'Falta', mercadoria:'Mercadoria', saldo_anterior:'Saldo devedor anterior', outro:'Outro' };
+  el.innerHTML = `<table><thead><tr><th>Data</th><th>Funcionário</th><th>Tipo</th><th>Valor</th><th>Obs.</th><th></th></tr></thead><tbody>` +
+    data.map(l => `<tr>
+      <td>${l.data.split('-').reverse().join('/')}</td>
+      <td>${escapeHtml(l.rh_funcionarios?.nome || '')}</td>
+      <td>${tipos[l.tipo] || l.tipo}</td>
+      <td class="money">${fmtMoney(l.valor)}</td>
+      <td class="muted">${escapeHtml(l.observacao || '')}</td>
+      <td><a href="#" onclick="removerLancamento('${l.id}');return false;" style="color:var(--red)">remover</a></td>
+    </tr>`).join('') + `</tbody></table>`;
+}
+async function removerLancamento(id) {
+  if (!confirm('Remover esse lançamento?')) return;
+  await sb.from('rh_lancamentos').delete().eq('id', id);
+  carregarLancamentos();
 }
 
 // ---------- Dados do painel principal (comissão automática) ----------
@@ -302,9 +374,22 @@ async function buscarVendidoRecebido(vendedor, mes, ano) {
   };
 }
 
+async function buscarLancamentosMes(funcionarioId, mes, ano) {
+  const ini = `${ano}-${String(mes).padStart(2,'0')}-01`;
+  const fim = `${ano}-${String(mes).padStart(2,'0')}-31`;
+  const { data } = await sb.from('rh_lancamentos').select('*').eq('funcionario_id', funcionarioId).gte('data', ini).lte('data', fim);
+  const lista = data || [];
+  const vr = lista.filter(l => l.tipo === 'vr');
+  const outros = lista.filter(l => l.tipo !== 'vr');
+  return { vrCount: vr.length, outros };
+}
+
 async function renderCardFechamento(f, mes, ano, existente, container) {
   const jaFechado = existente && existente.status === 'fechado';
   container._existente = existente || null;
+
+  const lancamentos = jaFechado ? { vrCount: 0, outros: [] } : await buscarLancamentosMes(f.id, mes, ano);
+  container._reciboDescontos = jaFechado ? null : lancamentos.outros.map(l => ({ tipo: l.tipo, valor: Number(l.valor), observacao: l.observacao }));
 
   let camposCalc = '';
   if (f.regra_pagamento === 'comissao') {
@@ -317,9 +402,11 @@ async function renderCardFechamento(f, mes, ano, existente, container) {
         <div class="field" style="max-width:150px"><label>Recebido no mês</label><input type="number" step="0.01" id="in-rec-${f.id}" value="${(existente?existente.recebido_mes:recebidoMes).toFixed(2)}"></div>
       </div>`;
   } else {
+    const diasPreenchido = existente?.dias_trabalhados ?? (lancamentos.vrCount || '');
     camposCalc = `<div class="row">
-      <div class="field" style="max-width:150px"><label>Dias trabalhados</label><input type="number" step="0.5" id="in-dias-${f.id}" value="${existente?.dias_trabalhados ?? ''}"></div>
-    </div>`;
+      <div class="field" style="max-width:150px"><label>Dias trabalhados</label><input type="number" step="0.5" id="in-dias-${f.id}" value="${diasPreenchido}"></div>
+    </div>
+    <p class="muted">${!jaFechado ? `Pré-preenchido com ${lancamentos.vrCount} dia(s) de VR lançado(s) em Lançamentos — pode ajustar aqui se precisar.` : ''}</p>`;
   }
   // Encargos formais (DSR, 13º, férias proporcionais) — agora pra todo mundo, não só registrado.
   const dm = diasNoMes(ano, mes), df = contarDomingos(ano, mes);
@@ -434,7 +521,9 @@ function abrirRecibo(fId, mes, ano) {
     carregarDescontosRecibo(fId, existente.id).then(descontos => renderRecibo(f, mes, ano, reconstruirExtraInfo(f, existente), existente.bruto, descontos, existente.liquido, true));
   } else {
     container._reciboDescontos = container._reciboDescontos || [];
-    renderRecibo(f, mes, ano, container._ultimoCalc.extraInfo, container._ultimoCalc.bruto, container._reciboDescontos, null, false);
+    // Recalcula já considerando os descontos pré-preenchidos (lançamentos do mês), pra abrir
+    // o recibo já mostrando o total certo, não o preview "sem desconto" da tela de fechamento.
+    reRenderReciboComDescontos(fId);
   }
 }
 async function carregarDescontosRecibo(fId, fechamentoId) {
