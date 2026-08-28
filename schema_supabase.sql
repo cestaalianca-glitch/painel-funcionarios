@@ -1,8 +1,14 @@
 -- Painel de Funcionários da Cesta Aliança (sistema separado do distribuidora, mesmo projeto Supabase).
 -- Prefixo "rh_" pra não colidir com nada do resto do banco.
--- Acesso: mesmo esquema dos outros painéis Aliança (senha compartilhada na tela, não Supabase Auth
--- por usuário) — RLS libera pro anon key, confiança fica na senha da tela + no fato de que só
--- gente de confiança tem o link.
+--
+-- Este arquivo já reflete o estado FINAL (schema inicial + migrations 0026/0027/0028 aplicadas) —
+-- é o que rodar se precisar recriar o banco do zero. As migrations continuam existindo separadas
+-- só como histórico de como se chegou até aqui.
+--
+-- Acesso: Supabase Auth de verdade (login por e-mail/senha) — RLS exige `authenticated`, NÃO libera
+-- pro anon key. Isso foi trocado em 25/08/2026 porque o repositório do código é público no GitHub;
+-- antes disso a trava era só uma senha compartilhada na tela, o que ficou visível/inseguro assim
+-- que o código virou público. Nunca recriar as policies antigas de "anon full access" aqui.
 
 create table rh_funcionarios (
   id uuid primary key default gen_random_uuid(),
@@ -18,6 +24,7 @@ create table rh_funcionarios (
   valor_fixo numeric(10,2) default 0,
   valor_diaria numeric(10,2) default 0,
   rotas text[] default '{}',                 -- rotas do vendedor (regra comissao), casa com o mapeamento do painel principal
+  vendedor_painel text,                      -- nome do vendedor tal como aparece em comissao-vendedores.js (só regra_pagamento='comissao')
   status text not null default 'ativo' check (status in ('ativo','desligado')),
   data_desligamento date,
   motivo_desligamento text,
@@ -81,24 +88,40 @@ create table rh_descontos (
   created_at timestamptz not null default now()
 );
 
+-- Lançamentos do dia a dia (vale, falta, mercadoria, saldo anterior, outro desconto, dia de VR
+-- pago) — registrados no momento em que acontecem, não só na hora de fechar o mês. Alimentam o
+-- fechamento automaticamente: "VR pago" vira dias trabalhados (R$25/dia), o resto vira desconto.
+create table rh_lancamentos (
+  id uuid primary key default gen_random_uuid(),
+  funcionario_id uuid not null references rh_funcionarios(id) on delete cascade,
+  tipo text not null check (tipo in ('vr','vale','falta','mercadoria','saldo_anterior','outro')),
+  data date not null,
+  valor numeric(10,2),
+  observacao text,
+  created_at timestamptz not null default now()
+);
+
 create index idx_rh_fechamentos_funcionario on rh_fechamentos(funcionario_id);
 create index idx_rh_fechamentos_mes_ano on rh_fechamentos(ano, mes);
 create index idx_rh_documentos_funcionario on rh_documentos(funcionario_id);
 create index idx_rh_descontos_fechamento on rh_descontos(fechamento_id);
+create index idx_rh_lancamentos_funcionario_data on rh_lancamentos(funcionario_id, data);
 
 alter table rh_funcionarios enable row level security;
 alter table rh_documentos enable row level security;
 alter table rh_fechamentos enable row level security;
 alter table rh_descontos enable row level security;
+alter table rh_lancamentos enable row level security;
 
-create policy "rh anon full access - funcionarios" on rh_funcionarios for all to anon using (true) with check (true);
-create policy "rh anon full access - documentos" on rh_documentos for all to anon using (true) with check (true);
-create policy "rh anon full access - fechamentos" on rh_fechamentos for all to anon using (true) with check (true);
-create policy "rh anon full access - descontos" on rh_descontos for all to anon using (true) with check (true);
+create policy "rh authenticated full access - funcionarios" on rh_funcionarios for all to authenticated using (true) with check (true);
+create policy "rh authenticated full access - documentos" on rh_documentos for all to authenticated using (true) with check (true);
+create policy "rh authenticated full access - fechamentos" on rh_fechamentos for all to authenticated using (true) with check (true);
+create policy "rh authenticated full access - descontos" on rh_descontos for all to authenticated using (true) with check (true);
+create policy "rh authenticated full access - lancamentos" on rh_lancamentos for all to authenticated using (true) with check (true);
 
 -- Bucket de armazenamento dos documentos dos funcionários (privado, só acessível via URL assinada)
 insert into storage.buckets (id, name, public) values ('rh-documentos', 'rh-documentos', false)
 on conflict (id) do nothing;
 
-create policy "rh anon full access - storage rh-documentos" on storage.objects for all to anon
+create policy "rh authenticated full access - storage rh-documentos" on storage.objects for all to authenticated
   using (bucket_id = 'rh-documentos') with check (bucket_id = 'rh-documentos');
