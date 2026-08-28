@@ -88,7 +88,7 @@ async function carregarLancamentos() {
   const ano = parseInt(document.getElementById('lancAnoFiltro').value, 10);
   if (!mes || !ano) return;
   const ini = `${ano}-${String(mes).padStart(2,'0')}-01`;
-  const fim = `${ano}-${String(mes).padStart(2,'0')}-31`;
+  const fim = `${ano}-${String(mes).padStart(2,'0')}-${String(diasNoMes(ano, mes)).padStart(2,'0')}`;
   const { data, error } = await sb.from('rh_lancamentos')
     .select('*, rh_funcionarios(nome)')
     .gte('data', ini).lte('data', fim)
@@ -376,8 +376,9 @@ async function buscarVendidoRecebido(vendedor, mes, ano) {
 
 async function buscarLancamentosMes(funcionarioId, mes, ano) {
   const ini = `${ano}-${String(mes).padStart(2,'0')}-01`;
-  const fim = `${ano}-${String(mes).padStart(2,'0')}-31`;
-  const { data } = await sb.from('rh_lancamentos').select('*').eq('funcionario_id', funcionarioId).gte('data', ini).lte('data', fim);
+  const fim = `${ano}-${String(mes).padStart(2,'0')}-${String(diasNoMes(ano, mes)).padStart(2,'0')}`;
+  const { data, error } = await sb.from('rh_lancamentos').select('*').eq('funcionario_id', funcionarioId).gte('data', ini).lte('data', fim);
+  if (error) console.warn('Erro ao buscar lançamentos do mês:', error.message);
   const lista = data || [];
   const vr = lista.filter(l => l.tipo === 'vr');
   const outros = lista.filter(l => l.tipo !== 'vr');
