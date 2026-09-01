@@ -785,6 +785,12 @@ async function baixarReciboExcelTemplate(r) {
   const buf = await res.arrayBuffer();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf);
+  // O modelo calcula nome/valores/mês por FÓRMULA (puxando da aba de cálculo abaixo), e o
+  // ExcelJS não recalcula nada — ele mantém o resultado em cache de quando o template foi
+  // sanitizado (tudo zerado/vazio). Sem isso, o Excel abre mostrando os valores antigos até
+  // alguém apertar F9, e como o arquivo baixado normalmente abre em Modo de Exibição
+  // Protegido, nem isso recalcula sozinho. Forçando o recálculo completo na abertura.
+  wb.calcProperties = { fullCalcOnLoad: true };
 
   const dados = wb.getWorksheet('JOAO CARLOS DE QUEIROZ');
   const recibo = wb.getWorksheet('Recibo de Pagamento');
@@ -805,7 +811,10 @@ async function baixarReciboExcelTemplate(r) {
     ['G14','G50'].forEach(a => recibo.getCell(a).value = '1/3 FÉRIAS PROPORCIONAIS');
   }
   // (W46:W50 já são fórmulas do modelo original que puxam de W10:W14 — não precisa mexer)
-  recibo.getCell('J41').value = f.nome.toUpperCase();
+  // J41 é o rótulo "Nome do Funcionário" da 2ª via (igual J5) — NÃO é o campo do nome. O
+  // nome de verdade ali é J42, que já é fórmula (=J6, que por sua vez puxa de C2 na aba de
+  // cálculo) — preenchendo J41 direto a gente apagava o rótulo e, com o recálculo ligado
+  // acima, o nome passava a aparecer duplicado (uma vez em J41, outra em J42).
   recibo.getCell('J43').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
   recibo.getCell('J7').value = f.regra_pagamento === 'comissao' ? 'VENDEDOR' : '';
   recibo.getCell('C3').value = `CC: ${f.regra_pagamento === 'comissao' ? 'Vendas' : '—'}`;
