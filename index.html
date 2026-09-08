@@ -10,7 +10,7 @@
 <script src="calc.js"></script>
 <style>
   :root {
-    --navy: #12213b; --navy-dark: #0b1526; --gold: #c9a04d; --gold-dark: #a5822f;
+    --navy: #0d1b40; --navy-dark: #081227; --gold: #f2b705; --gold-dark: #c99a04;
     --bg: #f4f5f7; --card: #ffffff; --border: #dde1e7; --text: #1c2430; --text-soft: #667085;
     --green: #1e7d4a; --red: #c0362c; --amber: #b5762a;
   }
@@ -36,6 +36,7 @@
   button.btn.gold:hover { background: var(--gold-dark); }
   button.btn.danger { background: var(--red); }
   button.btn.ghost { background:none; border:1px solid var(--border); color: var(--text); }
+  #listaLancamentos, #listaHistorico { overflow-x:auto; -webkit-overflow-scrolling:touch; }
   table { width:100%; border-collapse: collapse; font-size:13px; }
   th, td { padding:7px 8px; border-bottom:1px solid var(--border); text-align:left; }
   th { color: var(--text-soft); font-size:11px; text-transform:uppercase; }

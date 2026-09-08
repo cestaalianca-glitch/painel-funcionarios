@@ -3,3 +3,4 @@ node_modules/
 .DS_Store
 comissao-vendedores.js
 .netlify/
+supabase/.temp/
