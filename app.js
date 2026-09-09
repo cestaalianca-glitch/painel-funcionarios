@@ -114,12 +114,25 @@ async function removerLancamento(id) {
 }
 
 // ---------- Dados do painel principal (comissão automática) ----------
-function carregarComissaoData() {
-  const s = document.createElement('script');
-  s.src = window.PAINEL_URL + '/comissao-vendedores.js?_=' + Date.now();
-  s.onload = () => { COMISSAO_DATA = window.COMISSAO_VENDEDORES || null; };
-  s.onerror = () => { console.warn('Não consegui carregar comissao-vendedores.js do painel principal.'); };
-  document.head.appendChild(s);
+// comissao-vendedores.js agora fica atrás de login (Edge Function no painel
+// principal, ver Painel Alianca/dashboard/netlify/edge-functions/proteger-dados.js)
+// — por isso busca com fetch() + token da própria sessão, em vez de <script src>.
+async function carregarComissaoData() {
+  try {
+    const { data } = await sb.auth.getSession();
+    const token = data && data.session ? data.session.access_token : null;
+    const resp = await fetch(window.PAINEL_URL + '/comissao-vendedores.js?_=' + Date.now(), {
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const texto = await resp.text();
+    const s = document.createElement('script');
+    s.textContent = texto;
+    document.head.appendChild(s);
+    COMISSAO_DATA = window.COMISSAO_VENDEDORES || null;
+  } catch (err) {
+    console.warn('Não consegui carregar comissao-vendedores.js do painel principal:', err.message);
+  }
 }
 
 // ---------- Funcionários: lista ----------
