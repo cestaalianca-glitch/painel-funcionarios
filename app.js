@@ -676,10 +676,12 @@ function reRenderReciboComDescontos(fId) {
   const container = document.getElementById('fech-' + fId);
   const f = FUNCIONARIOS_CACHE.find(x => x.id === fId);
   let { bruto, extraInfo } = container._ultimoCalc;
-  // O total de vencimentos precisa subir junto com o desconto, pra manter o líquido final
-  // na meta original (fixo+diária, ou comissão informal — mesma técnica pra todo mundo).
+  // Descontos (vale/falta/mercadoria/etc) reduzem o líquido de verdade — os encargos
+  // (DSR/13º/férias) continuam calculados em cima do valor realmente ganho (metaLiquido),
+  // SEM inflar a base pra "absorver" o desconto (isso fazia o líquido final ignorar
+  // completamente o desconto lançado — corrigido em 09/09/2026).
   const totalDescontos = somaDescontos(container._reciboDescontos);
-  const base = calcFormalCLTReverso(extraInfo.metaLiquido, totalDescontos, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
+  const base = calcFormalCLTReverso(extraInfo.metaLiquido, 0, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
   const formal = calcFormalCLT(base, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
   extraInfo = { ...extraInfo, formal };
   bruto = formal.totalVencimentos + (extraInfo.diaria || 0);
@@ -695,9 +697,10 @@ async function confirmarFechamentoRecibo(fId, mes, ano) {
   const descontos = container._reciboDescontos || [];
   const totalDescontos = somaDescontos(descontos);
   let extra = calc.extraInfo;
-  // Refaz com os descontos de verdade — a base declarada muda quando existe desconto, pra
-  // ainda bater na meta de líquido original (mesma técnica pra todo mundo).
-  const baseCLT = calcFormalCLTReverso(extra.metaLiquido, totalDescontos, extra.formalDiasMes, extra.formalDomFeriados);
+  // Descontos reduzem o líquido de verdade — encargos calculados só em cima do valor
+  // realmente ganho (metaLiquido), sem inflar a base pra absorver o desconto (corrigido
+  // em 09/09/2026 — antes disso o líquido final ignorava o desconto lançado).
+  const baseCLT = calcFormalCLTReverso(extra.metaLiquido, 0, extra.formalDiasMes, extra.formalDomFeriados);
   const formal = calcFormalCLT(baseCLT, extra.formalDiasMes, extra.formalDomFeriados);
   extra = { ...extra, formal };
   const vrJaPago = extra.diaria || 0;
