@@ -454,7 +454,10 @@ function recalcularCard(fId, mes, ano) {
     const dias = parseFloat(document.getElementById('in-dias-' + fId)?.value) || 0;
     const r = calcInformalFixoDiaria(f, dias);
     extraInfo = { fixo: r.fixo, diaria: r.diaria };
-    metaLiquido = r.bruto;
+    // A diária (VR) é paga em dinheiro dia a dia, fora do sistema — não faz parte da "base
+    // declarada" que gera os encargos (DSR/13º/férias), e não pode ser cobrada de novo no
+    // líquido a pagar agora. Só o Fixo vira meta de líquido pros encargos formais.
+    metaLiquido = r.fixo;
   }
 
   // Encargos formais (DSR, 13º, férias proporcionais) — pra todo mundo, com base no valor
@@ -467,7 +470,9 @@ function recalcularCard(fId, mes, ano) {
   extraInfo.formalDiasMes = dm;
   extraInfo.formalDomFeriados = df;
   extraInfo.metaLiquido = metaLiquido;
-  bruto = formal.totalVencimentos;
+  // VR (diária) some pro total geral de vencimentos (aparece no recibo, informativo), mas é
+  // descontado à parte no líquido final — não é "desconto", é dinheiro que já saiu da mão.
+  bruto = formal.totalVencimentos + (extraInfo.diaria || 0);
 
   container._ultimoCalc = { bruto, extraInfo };
 
@@ -572,12 +577,16 @@ function linhasVencimentosTabela(f, extraInfo, bruto) {
     [`FÉRIAS PROPORCIONAIS ${base}`, extraInfo.formal.feriasProp],
     [`1/3 FÉRIAS PROPORCIONAIS ${base}`, extraInfo.formal.umTercoFeriasProp],
   ];
+  if (extraInfo.diaria) {
+    linhas.push(['VR (já pago em dinheiro)', extraInfo.diaria]);
+  }
   return linhas.map(([desc, val]) => `<tr><td class="rc-codigo"></td><td>${desc}</td><td class="rc-ref"></td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
 }
 
 function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, readonly) {
   const totalDescontos = somaDescontos(descontos);
-  const liquido = liquidoSalvo != null ? liquidoSalvo : (bruto - totalDescontos);
+  const vrJaPago = extraInfo.diaria || 0;
+  const liquido = liquidoSalvo != null ? liquidoSalvo : (bruto - totalDescontos - vrJaPago);
   const hoje = new Date().toLocaleDateString('pt-BR');
 
   document.getElementById('reciboConteudo').innerHTML = `
@@ -606,7 +615,8 @@ function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, re
       <table class="rc-totais">
         <tr><td>Observações:</td><td>Total de Vencimentos</td><td class="rc-valor">${fmtMoney(bruto)}</td></tr>
         <tr><td></td><td>Total de Descontos</td><td class="rc-valor">${fmtMoney(totalDescontos)}</td></tr>
-        <tr class="rc-liquido"><td></td><td>Valor Líquido</td><td class="rc-valor">${fmtMoney(liquido)}</td></tr>
+        ${vrJaPago ? `<tr><td></td><td>VR já pago em dinheiro (não entra no valor a pagar agora)</td><td class="rc-valor">${fmtMoney(vrJaPago)}</td></tr>` : ''}
+        <tr class="rc-liquido"><td></td><td>Valor Líquido a pagar agora</td><td class="rc-valor">${fmtMoney(liquido)}</td></tr>
       </table>
       <div class="rc-assinatura">
         Emitido em ${hoje}.<br><br>
@@ -659,7 +669,7 @@ function reRenderReciboComDescontos(fId) {
   const base = calcFormalCLTReverso(extraInfo.metaLiquido, totalDescontos, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
   const formal = calcFormalCLT(base, extraInfo.formalDiasMes, extraInfo.formalDomFeriados);
   extraInfo = { ...extraInfo, formal };
-  bruto = formal.totalVencimentos;
+  bruto = formal.totalVencimentos + (extraInfo.diaria || 0);
   renderRecibo(f, container._mes, container._ano, extraInfo, bruto, container._reciboDescontos, null, false);
 }
 
@@ -677,8 +687,9 @@ async function confirmarFechamentoRecibo(fId, mes, ano) {
   const baseCLT = calcFormalCLTReverso(extra.metaLiquido, totalDescontos, extra.formalDiasMes, extra.formalDomFeriados);
   const formal = calcFormalCLT(baseCLT, extra.formalDiasMes, extra.formalDomFeriados);
   extra = { ...extra, formal };
-  const bruto = formal.totalVencimentos;
-  const liquido = bruto - totalDescontos;
+  const vrJaPago = extra.diaria || 0;
+  const bruto = formal.totalVencimentos + vrJaPago;
+  const liquido = bruto - totalDescontos - vrJaPago;
 
   const payload = {
     funcionario_id: fId, mes, ano,
