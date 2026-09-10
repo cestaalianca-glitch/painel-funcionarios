@@ -388,14 +388,20 @@ async function buscarVendidoRecebido(vendedor, mes, ano) {
 }
 
 async function buscarLancamentosMes(funcionarioId, mes, ano) {
+  // Vale/falta/mercadoria/saldo anterior seguem o mês calendário normal.
   const ini = `${ano}-${String(mes).padStart(2,'0')}-01`;
   const fim = `${ano}-${String(mes).padStart(2,'0')}-${String(diasNoMes(ano, mes)).padStart(2,'0')}`;
-  const { data, error } = await sb.from('rh_lancamentos').select('*').eq('funcionario_id', funcionarioId).gte('data', ini).lte('data', fim);
-  if (error) console.warn('Erro ao buscar lançamentos do mês:', error.message);
-  const lista = data || [];
-  const vr = lista.filter(l => l.tipo === 'vr');
-  const outros = lista.filter(l => l.tipo !== 'vr');
-  return { vrCount: vr.length, outros };
+  const { data: outrosData, error: e1 } = await sb.from('rh_lancamentos').select('*')
+    .eq('funcionario_id', funcionarioId).neq('tipo', 'vr').gte('data', ini).lte('data', fim);
+  if (e1) console.warn('Erro ao buscar lançamentos (descontos) do mês:', e1.message);
+
+  // VR segue o ciclo próprio (dia 11 até dia 10 do mês seguinte), não o mês calendário.
+  const ciclo = cicloVRDatas(ano, mes);
+  const { data: vrData, error: e2 } = await sb.from('rh_lancamentos').select('*')
+    .eq('funcionario_id', funcionarioId).eq('tipo', 'vr').gte('data', ciclo.ini).lte('data', ciclo.fim);
+  if (e2) console.warn('Erro ao buscar lançamentos de VR do ciclo:', e2.message);
+
+  return { vrCount: (vrData || []).length, outros: outrosData || [] };
 }
 
 async function renderCardFechamento(f, mes, ano, existente, container) {
@@ -415,13 +421,17 @@ async function renderCardFechamento(f, mes, ano, existente, container) {
         <div class="field" style="max-width:150px"><label>Vendido mês -2</label><input type="number" step="0.01" id="in-vm2-${f.id}" value="${vendidoM2.toFixed(2)}"></div>
         <div class="field" style="max-width:150px"><label>Recebido no mês</label><input type="number" step="0.01" id="in-rec-${f.id}" value="${(existente?existente.recebido_mes:recebidoMes).toFixed(2)}"></div>
       </div>`;
-  } else {
+  } else if ((f.valor_diaria || 0) > 0) {
+    // Só mostra dias trabalhados/VR pra quem realmente tem diária (fixo_diaria/diaria) — pra
+    // quem é só fixo (ex: Thiago) isso não tem efeito nenhum no pagamento, só confundia.
     const diasPreenchido = existente?.dias_trabalhados ?? (lancamentos.vrCount || '');
     const vrJaPagoMarcado = existente ? !!existente.vr_ja_pago : false;
+    const ciclo = cicloVRDatas(ano, mes);
+    const cicloTxt = `${ciclo.ini.split('-').reverse().join('/')} a ${ciclo.fim.split('-').reverse().join('/')}`;
     camposCalc = `<div class="row">
       <div class="field" style="max-width:150px"><label>Dias trabalhados</label><input type="number" step="0.5" id="in-dias-${f.id}" value="${diasPreenchido}"></div>
     </div>
-    <p class="muted">${!jaFechado ? `Pré-preenchido com ${lancamentos.vrCount} dia(s) de VR lançado(s) em Lançamentos — pode ajustar aqui se precisar.` : ''}</p>
+    <p class="muted">${!jaFechado ? `Pré-preenchido com ${lancamentos.vrCount} dia(s) de VR lançado(s) no ciclo ${cicloTxt} (não é o mês calendário) — pode ajustar aqui se precisar.` : ''}</p>
     <div class="field">
       <label><input type="checkbox" id="in-vrpago-${f.id}" ${vrJaPagoMarcado ? 'checked' : ''} style="width:auto;display:inline-block;margin-right:6px">
       VR já foi pago em dinheiro ao longo do mês (não marcar se ainda está pendente)</label>

@@ -75,6 +75,18 @@ function diasNoMes(ano, mes) {
   return new Date(ano, mes, 0).getDate();
 }
 
+/** Ciclo de VR/diária: dia 11 do mês do fechamento até dia 10 do mês seguinte — não é o mês
+ * calendário (confirmado pelo usuário em 10/09/2026). Só vale pra contagem de dias de VR;
+ * o salário fixo e os encargos dele continuam no mês calendário normal. */
+function cicloVRDatas(ano, mes) {
+  const anoFim = mes === 12 ? ano + 1 : ano;
+  const mesFim = mes === 12 ? 1 : mes + 1;
+  return {
+    ini: `${ano}-${String(mes).padStart(2, '0')}-11`,
+    fim: `${anoFim}-${String(mesFim).padStart(2, '0')}-10`,
+  };
+}
+
 function fmtMoney(v) {
   return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
