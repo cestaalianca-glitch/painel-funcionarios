@@ -417,10 +417,15 @@ async function renderCardFechamento(f, mes, ano, existente, container) {
       </div>`;
   } else {
     const diasPreenchido = existente?.dias_trabalhados ?? (lancamentos.vrCount || '');
+    const vrJaPagoMarcado = existente ? !!existente.vr_ja_pago : false;
     camposCalc = `<div class="row">
       <div class="field" style="max-width:150px"><label>Dias trabalhados</label><input type="number" step="0.5" id="in-dias-${f.id}" value="${diasPreenchido}"></div>
     </div>
-    <p class="muted">${!jaFechado ? `Pré-preenchido com ${lancamentos.vrCount} dia(s) de VR lançado(s) em Lançamentos — pode ajustar aqui se precisar.` : ''}</p>`;
+    <p class="muted">${!jaFechado ? `Pré-preenchido com ${lancamentos.vrCount} dia(s) de VR lançado(s) em Lançamentos — pode ajustar aqui se precisar.` : ''}</p>
+    <div class="field">
+      <label><input type="checkbox" id="in-vrpago-${f.id}" ${vrJaPagoMarcado ? 'checked' : ''} style="width:auto;display:inline-block;margin-right:6px">
+      VR já foi pago em dinheiro ao longo do mês (não marcar se ainda está pendente)</label>
+    </div>`;
   }
   // Encargos formais (DSR, 13º, férias proporcionais) — agora pra todo mundo, não só registrado.
   const dm = diasNoMes(ano, mes), df = contarDomingos(ano, mes);
@@ -483,8 +488,10 @@ function recalcularCard(fId, mes, ano) {
   extraInfo.formalDiasMes = dm;
   extraInfo.formalDomFeriados = df;
   extraInfo.metaLiquido = metaLiquido;
-  // VR (diária) some pro total geral de vencimentos (aparece no recibo, informativo), mas é
-  // descontado à parte no líquido final — não é "desconto", é dinheiro que já saiu da mão.
+  // VR (diária) sempre soma no total geral de vencimentos (é parte do que a pessoa ganhou no
+  // mês). Só é descontado à parte do líquido final se JÁ FOI PAGO em dinheiro — marcado no
+  // checkbox "VR já foi pago" — senão ele fica embutido no líquido a pagar agora mesmo.
+  extraInfo.vrJaPago = !!document.getElementById('in-vrpago-' + fId)?.checked;
   bruto = formal.totalVencimentos + (extraInfo.diaria || 0);
 
   container._ultimoCalc = { bruto, extraInfo };
@@ -554,7 +561,7 @@ function reconstruirExtraInfo(f, existente) {
   const extraInfo = f.regra_pagamento === 'comissao'
     ? { ideal: existente.ideal_calculado, atingimentoPct: existente.atingimento_pct,
         comissaoPct: existente.comissao_pct, comissaoValorInformal: existente.comissao_valor }
-    : { fixo: existente.valor_fixo_aplicado, diaria: existente.valor_diaria_aplicado };
+    : { fixo: existente.valor_fixo_aplicado, diaria: existente.valor_diaria_aplicado, vrJaPago: !!existente.vr_ja_pago };
   if (existente.formal_total_vencimentos != null) {
     extraInfo.formal = {
       comissaoBase: existente.formal_valor_comissao_base, dsr: existente.formal_dsr,
@@ -591,14 +598,17 @@ function linhasVencimentosTabela(f, extraInfo, bruto) {
     [`1/3 FÉRIAS PROPORCIONAIS ${base}`, extraInfo.formal.umTercoFeriasProp],
   ];
   if (extraInfo.diaria) {
-    linhas.push(['VR (já pago em dinheiro)', extraInfo.diaria]);
+    linhas.push([extraInfo.vrJaPago ? 'VR (já pago em dinheiro)' : 'VR (incluso no pagamento de hoje)', extraInfo.diaria]);
   }
   return linhas.map(([desc, val]) => `<tr><td class="rc-codigo"></td><td>${desc}</td><td class="rc-ref"></td><td class="rc-valor">${fmtMoney(val)}</td></tr>`).join('');
 }
 
 function renderRecibo(f, mes, ano, extraInfo, bruto, descontos, liquidoSalvo, readonly) {
   const totalDescontos = somaDescontos(descontos);
-  const vrJaPago = extraInfo.diaria || 0;
+  // Só desconta o VR do líquido se ele JÁ FOI PAGO em dinheiro (marcado no fechamento) — se
+  // ainda está pendente, ele fica embutido no líquido a pagar agora (corrigido em 10/09/2026,
+  // achado real: Gustavo/Luan/Deivid Gabriel tinham VR pendente que estava sumindo do cálculo).
+  const vrJaPago = extraInfo.vrJaPago ? (extraInfo.diaria || 0) : 0;
   const liquido = liquidoSalvo != null ? liquidoSalvo : (bruto - totalDescontos - vrJaPago);
   const hoje = new Date().toLocaleDateString('pt-BR');
 
@@ -703,8 +713,9 @@ async function confirmarFechamentoRecibo(fId, mes, ano) {
   const baseCLT = calcFormalCLTReverso(extra.metaLiquido, 0, extra.formalDiasMes, extra.formalDomFeriados);
   const formal = calcFormalCLT(baseCLT, extra.formalDiasMes, extra.formalDomFeriados);
   extra = { ...extra, formal };
-  const vrJaPago = extra.diaria || 0;
-  const bruto = formal.totalVencimentos + vrJaPago;
+  const diariaValor = extra.diaria || 0;
+  const vrJaPago = extra.vrJaPago ? diariaValor : 0;
+  const bruto = formal.totalVencimentos + diariaValor;
   const liquido = bruto - totalDescontos - vrJaPago;
 
   const payload = {
@@ -712,6 +723,7 @@ async function confirmarFechamentoRecibo(fId, mes, ano) {
     dias_trabalhados: f.regra_pagamento !== 'comissao' ? (parseFloat(document.getElementById('in-dias-' + fId)?.value) || 0) : null,
     valor_fixo_aplicado: extra.fixo ?? null,
     valor_diaria_aplicado: extra.diaria ?? null,
+    vr_ja_pago: !!extra.vrJaPago,
     ideal_calculado: extra.ideal ?? null,
     recebido_mes: extra.recebidoMes ?? null,
     atingimento_pct: extra.atingimentoPct ?? null,
