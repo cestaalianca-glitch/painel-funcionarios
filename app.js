@@ -114,24 +114,16 @@ async function removerLancamento(id) {
 }
 
 // ---------- Dados do painel principal (comissão automática) ----------
-// comissao-vendedores.js agora fica atrás de login (Edge Function no painel
-// principal, ver Painel Alianca/dashboard/netlify/edge-functions/proteger-dados.js)
-// — por isso busca com fetch() + token da própria sessão, em vez de <script src>.
+// Vem direto do Supabase (tabela painel_dados, linha 'comissao') em vez de um
+// arquivo estático do painel principal — mesma sessão de login (RLS exige
+// authenticated), sem depender do Netlify publicar nada (11/09/2026).
 async function carregarComissaoData() {
   try {
-    const { data } = await sb.auth.getSession();
-    const token = data && data.session ? data.session.access_token : null;
-    const resp = await fetch(window.PAINEL_URL + '/comissao-vendedores.js?_=' + Date.now(), {
-      headers: token ? { Authorization: 'Bearer ' + token } : {},
-    });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const texto = await resp.text();
-    const s = document.createElement('script');
-    s.textContent = texto;
-    document.head.appendChild(s);
-    COMISSAO_DATA = window.COMISSAO_VENDEDORES || null;
+    const { data, error } = await sb.from('painel_dados').select('dados').eq('id', 'comissao').single();
+    if (error) throw error;
+    COMISSAO_DATA = data.dados || null;
   } catch (err) {
-    console.warn('Não consegui carregar comissao-vendedores.js do painel principal:', err.message);
+    console.warn('Não consegui carregar dados de comissão do Supabase:', err.message);
   }
 }
 
