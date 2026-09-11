@@ -219,6 +219,7 @@ function abrirFormFuncionario(id) {
         <div class="row" style="justify-content:space-between; margin-top:14px">
           <div>
             ${!isNovo && f.status==='ativo' ? `<button class="btn danger" onclick="abrirDesligamento('${id}')">Desligar</button>` : ''}
+            ${!isNovo && f.status==='desligado' ? `<button class="btn" onclick="confirmarReativacao('${id}')">Reativar</button>` : ''}
           </div>
           <div class="row">
             <button class="btn ghost" onclick="fecharModal()">Cancelar</button>
@@ -334,6 +335,21 @@ async function confirmarDesligamento(id) {
     motivo_desligamento: document.getElementById('dlgMotivo').value.trim(),
     valor_acerto: parseFloat(document.getElementById('dlgValor').value) || null,
     obs_desligamento: document.getElementById('dlgObs').value.trim(),
+  };
+  const { error } = await sb.from('rh_funcionarios').update(payload).eq('id', id);
+  if (error) { alert('Erro: ' + error.message); return; }
+  fecharModal();
+  carregarFuncionarios();
+}
+async function confirmarReativacao(id) {
+  const f = FUNCIONARIOS_CACHE.find(x => x.id === id);
+  if (!confirm(`Reativar ${f ? f.nome : 'este funcionário'}? Ele volta a aparecer como ativo em fechamentos e lançamentos.`)) return;
+  const payload = {
+    status: 'ativo',
+    data_desligamento: null,
+    motivo_desligamento: null,
+    valor_acerto: null,
+    obs_desligamento: null,
   };
   const { error } = await sb.from('rh_funcionarios').update(payload).eq('id', id);
   if (error) { alert('Erro: ' + error.message); return; }
