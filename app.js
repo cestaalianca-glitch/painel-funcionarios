@@ -871,16 +871,27 @@ async function baixarReciboExcelTemplate(r) {
   recibo.getCell('V4').value = labelTipoContrato(f);
   recibo.getCell('V40').value = labelTipoContrato(f);
 
-  // Descontos: linhas extras (negativas) na mesma coluna de vencimentos (linhas 15-25 já entram
-  // na soma original do arquivo — SUM(W10:AH25) — e espelhadas na 2ª via, linhas 51-61).
-  descontos.forEach((d, i) => {
-    const linha = 15 + i;
-    if (linha > 25) return; // modelo só tem espaço até a linha 25
+  // VR (diária) e descontos dividem as mesmas linhas extras de vencimento (15-25, já somadas
+  // no arquivo — SUM(W10:AH25) — e espelhadas na 2ª via, 51-61). VR só entra aqui quando ainda
+  // está PENDENTE (soma no líquido, positivo) — se já foi pago em dinheiro, fica de fora
+  // (mesma regra da tela: não conta de novo). Achado em 11/09/2026: o Excel nunca considerava
+  // o VR de jeito nenhum, dando um líquido menor que o real pra quem tinha VR pendente.
+  let linhaExtra = 15;
+  if (extraInfo.diaria && !extraInfo.vrJaPago) {
+    recibo.getCell('G' + linhaExtra).value = 'VR (a receber, incluso neste pagamento)';
+    recibo.getCell('W' + linhaExtra).value = extraInfo.diaria;
+    recibo.getCell('G' + (linhaExtra + 36)).value = 'VR (a receber, incluso neste pagamento)';
+    recibo.getCell('W' + (linhaExtra + 36)).value = extraInfo.diaria;
+    linhaExtra++;
+  }
+  descontos.forEach((d) => {
+    if (linhaExtra > 25) return; // modelo só tem espaço até a linha 25
     const desc = 'DESCONTO: ' + TIPOS_DESCONTO[d.tipo] + (d.observacao ? ' — ' + d.observacao : '');
-    recibo.getCell('G' + linha).value = desc;
-    recibo.getCell('W' + linha).value = -Math.abs(d.valor);
-    recibo.getCell('G' + (linha + 36)).value = desc;
-    recibo.getCell('W' + (linha + 36)).value = -Math.abs(d.valor);
+    recibo.getCell('G' + linhaExtra).value = desc;
+    recibo.getCell('W' + linhaExtra).value = -Math.abs(d.valor);
+    recibo.getCell('G' + (linhaExtra + 36)).value = desc;
+    recibo.getCell('W' + (linhaExtra + 36)).value = -Math.abs(d.valor);
+    linhaExtra++;
   });
 
   const buffer = await wb.xlsx.writeBuffer();
