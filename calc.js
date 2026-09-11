@@ -10,21 +10,29 @@ function calcInformalFixoDiaria(func, diasTrabalhados) {
   return { bruto: fixo + diaria, fixo, diaria };
 }
 
+/** Piso garantido pra quem é comissionado — nenhum vendedor recebe menos que isso,
+ * mesmo em mês fraco (confirmado pelo usuário). Antes de 11/09/2026 isso não existia
+ * no código: alguém tinha que perceber e ajustar na mão todo mês fraco. */
+const PISO_COMISSAO = 2040.00;
+
 /**
  * Comissão informal (Pedro, Juciano/Joãozinho, Jayme, Kinka — e base do João antes do formal).
  * ideal = média do vendido (emitido) nos 2 meses anteriores.
  * atingimento = recebido no mês / ideal.
  * comissão% = min(atingimento / 10, 9%).
  * comissão = comissão% × recebido no mês.
+ * Se o resultado ficar abaixo do piso garantido, o piso entra no lugar.
  */
 function calcComissaoInformal(vendidoMesM1, vendidoMesM2, recebidoMes) {
   const ideal = ((Number(vendidoMesM1) || 0) + (Number(vendidoMesM2) || 0)) / 2;
-  if (!ideal) return { ideal: 0, atingimentoPct: 0, comissaoPct: 0, comissaoValor: 0 };
+  if (!ideal) return { ideal: 0, atingimentoPct: 0, comissaoPct: 0, comissaoValorCalculado: 0, comissaoValor: PISO_COMISSAO, pisoAplicado: true };
   const atingimentoFrac = (Number(recebidoMes) || 0) / ideal;
   let comissaoPct = Math.min(atingimentoFrac / 10, 0.09);
   if (comissaoPct < 0) comissaoPct = 0;
-  const comissaoValor = comissaoPct * (Number(recebidoMes) || 0);
-  return { ideal, atingimentoPct: atingimentoFrac * 100, comissaoPct: comissaoPct * 100, comissaoValor };
+  const comissaoValorCalculado = comissaoPct * (Number(recebidoMes) || 0);
+  const pisoAplicado = comissaoValorCalculado < PISO_COMISSAO;
+  const comissaoValor = pisoAplicado ? PISO_COMISSAO : comissaoValorCalculado;
+  return { ideal, atingimentoPct: atingimentoFrac * 100, comissaoPct: comissaoPct * 100, comissaoValorCalculado, comissaoValor, pisoAplicado };
 }
 
 /**

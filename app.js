@@ -492,7 +492,7 @@ function recalcularCard(fId, mes, ano) {
     const vm2 = parseFloat(document.getElementById('in-vm2-' + fId)?.value) || 0;
     const rec = parseFloat(document.getElementById('in-rec-' + fId)?.value) || 0;
     const r = calcComissaoInformal(vm1, vm2, rec);
-    extraInfo = { ideal: r.ideal, atingimentoPct: r.atingimentoPct, comissaoPct: r.comissaoPct, comissaoValorInformal: r.comissaoValor, recebidoMes: rec };
+    extraInfo = { ideal: r.ideal, atingimentoPct: r.atingimentoPct, comissaoPct: r.comissaoPct, comissaoValorCalculado: r.comissaoValorCalculado, comissaoValorInformal: r.comissaoValor, pisoAplicado: r.pisoAplicado, recebidoMes: rec };
     metaLiquido = r.comissaoValor;
   } else {
     const dias = parseFloat(document.getElementById('in-dias-' + fId)?.value) || 0;
@@ -532,7 +532,10 @@ function linhasVencimentos(f, extraInfo, bruto) {
     linhas += `<div><span>Ideal (média 2 meses)</span><span>${fmtMoney(extraInfo.ideal)}</span></div>`;
     linhas += `<div><span>Atingimento</span><span>${(extraInfo.atingimentoPct||0).toFixed(1)}%</span></div>`;
     linhas += `<div><span>% Comissão (teto 9%)</span><span>${(extraInfo.comissaoPct||0).toFixed(2)}%</span></div>`;
-    linhas += `<div><span>Comissão calculada</span><span>${fmtMoney(extraInfo.comissaoValorInformal)}</span></div>`;
+    linhas += `<div><span>Comissão calculada</span><span>${fmtMoney(extraInfo.comissaoValorCalculado ?? extraInfo.comissaoValorInformal)}</span></div>`;
+    if (extraInfo.pisoAplicado) {
+      linhas += `<div style="color:var(--gold-dark)"><span>Piso garantido aplicado</span><span>${fmtMoney(extraInfo.comissaoValorInformal)}</span></div>`;
+    }
   } else {
     linhas += `<div><span>Fixo</span><span>${fmtMoney(extraInfo.fixo)}</span></div>`;
     linhas += `<div><span>Diária</span><span>${fmtMoney(extraInfo.diaria)}</span></div>`;
