@@ -1,0 +1,34 @@
+#!/bin/sh
+# GANCHO pre-push (governança, 15/11/2026): antes de qualquer envio ao GitHub, roda a trava do repositório no conteúdo EXATO de cada
+# commit que está saindo. É a última barreira antes de o arquivo deixar este computador: backup (.bak-*), segredo, sessão de WhatsApp,
+# lista/CSV de cliente e dado sensível na linha pública não saem.
+# Ligar nesta cópia do repositório:  node .github/ci/instalar-ganchos.js      Desligar:  node .github/ci/instalar-ganchos.js --desligar
+# Tudo certo: não imprime nada. Se a trava não conseguir rodar (sem node, erro interno), o envio é LIBERADO com aviso: a esteira do
+# GitHub confere de novo.
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+TRAVA=""
+for t in conferir-repo.js conferir-publico.js; do [ -f "$RAIZ/.github/ci/$t" ] && TRAVA="$RAIZ/.github/ci/$t" && break; done
+[ -n "$TRAVA" ] || exit 0
+command -v node >/dev/null 2>&1 || { echo "aviso: node não encontrado; trava do envio pulada (a esteira do GitHub confere)" >&2; exit 0; }
+ZEROS="0000000000000000000000000000000000000000"
+barrado=0
+# o git manda por linha: <ref local> <sha local> <ref remoto> <sha remoto>
+while read -r ref_local sha_local ref_remoto sha_remoto; do
+  [ -n "$sha_local" ] || continue
+  [ "$sha_local" = "$ZEROS" ] && continue   # apagando uma branch remota: nada a conferir
+  saida="$(node "$TRAVA" --commit "$sha_local" 2>&1)"
+  codigo=$?
+  if [ "$codigo" = 1 ]; then
+    printf '%s\n' "$saida" >&2
+    barrado=1
+  elif [ "$codigo" != 0 ]; then
+    printf '%s\n' "$saida" >&2
+    echo "aviso: a trava não conseguiu rodar em $ref_local (código $codigo); a esteira do GitHub confere de novo" >&2
+  fi
+done
+if [ "$barrado" = 1 ]; then
+  echo "" >&2
+  echo "ENVIO BLOQUEADO pela trava do repositório (lista acima). Nada saiu deste computador. Corrija num commit novo (ou refaça o commit) e envie de novo." >&2
+  exit 1
+fi
+exit 0

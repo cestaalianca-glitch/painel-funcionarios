@@ -1,0 +1,50 @@
+# SAÚDE DO REPOSITÓRIO (governança, 15/11/2026). Toda segunda-feira cedo (e pelo botão "Run workflow"):
+#   1) audita: proteção do master, branches (incorporada, parada, em andamento), esteiras (desligada, falhando), pull requests velhos,
+#      se a página está no ar e a trava da linha pública;
+#   2) limpa: apaga as branches remotas JÁ INCORPORADAS ao master e paradas há mais de 7 dias (regras em .github/ci/saude-repo.js e
+#      .github/ci/governanca.json). Branch com trabalho que ainda não entrou nunca é apagada, só aparece como "parada".
+# Havendo alerta: a execução falha (o GitHub avisa por e-mail) e abre/atualiza a Issue com o rótulo saude-automatica; quando o alerta some,
+# a Issue fecha sozinha. O relatório completo fica no resumo da execução (aba Actions). Não usa nenhum segredo.
+name: Saúde do repositório (semanal)
+
+on:
+  schedule:
+    - cron: '3 10 * * 1' # segunda-feira, 07:03 de Brasília
+  workflow_dispatch:
+    inputs:
+      limpar:
+        description: 'Apagar as branches já incorporadas? (não = só relatório)'
+        type: choice
+        options: ['sim', 'não']
+        default: 'sim'
+
+permissions:
+  contents: write # só para apagar branch já incorporada
+  issues: write   # só para a Issue de alerta
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: saude
+  cancel-in-progress: false
+
+jobs:
+  saude:
+    name: Auditoria e limpeza
+    # só o master audita e limpa (uma branch não pode apagar outras)
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: America/Sao_Paulo
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Auditar e limpar
+        env:
+          LIMPAR: ${{ github.event_name == 'schedule' && 'sim' || inputs.limpar }}
+        run: |
+          if [ "$LIMPAR" = "sim" ]; then node .github/ci/saude-repo.js --limpar --issue; else node .github/ci/saude-repo.js --issue; fi

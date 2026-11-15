@@ -1,0 +1,81 @@
+# ESTEIRA DE PAINEL DE FUNCIONÁRIOS (governança, 15/11/2026). A cada push ou pull request, em qualquer branch:
+#   1) trava da linha pública: nenhum .bak-*, segredo, planilha/CSV/PDF, sessão, chave de serviço, CPF, telefone, valor ou e-mail em nenhum
+#      arquivo (exceções declaradas, com o motivo, em .github/ci/permitidos.json);
+#   2) sintaxe: todo .js e todo <script> embutido nas páginas precisa compilar; padrão das esteiras;
+#   3) versão limpa (_site/, só páginas) guardada como prévia baixável: artefato "previa-funcionarios-<commit>", 14 dias.
+# A PUBLICAÇÃO NÃO PASSA POR AQUI: o GitHub Pages deste repositório publica sozinho o que entra na branch master. Por isso branch
+# feat/... e pull request nunca publicam: só o merge na master, aprovado pelo Gestor, vai para o ar.
+# Pelo botão "Run workflow", o campo "ramo" monta a prévia de uma branch criada antes desta esteira existir (ela é conferida com as
+# regras da master).
+name: Painel de Funcionários — conferir e prévia
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      ramo:
+        description: 'Branch para conferir e montar a prévia (vazio = a branch escolhida acima)'
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}-${{ inputs.ramo }}
+  cancel-in-progress: true
+
+jobs:
+  conferir:
+    name: Conferir e montar a prévia
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Escolher o que conferir (esta branch ou a do campo "ramo")
+        id: alvo
+        env:
+          RAMO: ${{ inputs.ramo }}
+        run: |
+          if [ -n "$RAMO" ]; then
+            git fetch --no-tags --depth=1 origin "+refs/heads/${RAMO}:refs/remotes/origin/${RAMO}"
+            git worktree add --detach _alvo "origin/${RAMO}"
+            mkdir -p _alvo/.github && rm -rf _alvo/.github/ci && cp -r .github/ci _alvo/.github/ci
+            { echo "pasta=_alvo"; echo "ramo=${RAMO}"; echo "sha=$(git rev-parse "origin/${RAMO}")"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "pasta=."; echo "ramo=${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"; echo "sha=${GITHUB_SHA}"; } >> "$GITHUB_OUTPUT"
+          fi
+      - name: Trava da linha pública (.bak, segredo, arquivo de dado, dado de cliente)
+        working-directory: ${{ steps.alvo.outputs.pasta }}
+        run: node .github/ci/conferir-publico.js
+      - name: Sintaxe (.js, scripts embutidos nas páginas, .json)
+        if: ${{ !cancelled() }}
+        working-directory: ${{ steps.alvo.outputs.pasta }}
+        run: node .github/ci/conferir-sintaxe.js
+      - name: Padrão das esteiras (permissão mínima, tempo-limite, ações oficiais)
+        if: ${{ !cancelled() }}
+        run: node .github/ci/conferir-esteiras.js
+      - name: Montar a versão limpa
+        working-directory: ${{ steps.alvo.outputs.pasta }}
+        run: node .github/ci/montar-site.js
+      - name: Prévia para baixar (abra index.html no navegador)
+        uses: actions/upload-artifact@v4
+        with:
+          name: previa-funcionarios-${{ steps.alvo.outputs.sha }}
+          path: ${{ steps.alvo.outputs.pasta }}/_site
+          retention-days: 14
+      - name: Resumo da prévia
+        env:
+          RAMO: ${{ steps.alvo.outputs.ramo }}
+          SHA: ${{ steps.alvo.outputs.sha }}
+        run: |
+          {
+            echo "### Prévia de Painel de Funcionários: \`${RAMO}\` (commit ${SHA:0:7})"
+            echo "- Baixe o artefato **previa-funcionarios-${SHA}** (no fim desta página, em Artifacts), descompacte e abra \`index.html\` no navegador."
+            echo "- Para testar no celular: na pasta descompactada, rode \`npx --yes http-server -p 8080 -c-1 .\` e abra o endereço do computador na mesma rede."
+            echo "- Esta esteira **não publica nada**. A página só muda depois do merge na \`master\` aprovado pelo Gestor: aí o GitHub Pages publica sozinho."
+          } >> "$GITHUB_STEP_SUMMARY"

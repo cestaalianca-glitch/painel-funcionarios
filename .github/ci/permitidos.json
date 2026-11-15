@@ -1,0 +1,17 @@
+{
+  "_sobre": "Exceções justificadas da trava da linha pública deste repositório. Só entra aqui dado PÚBLICO por desenho ou exemplo de preenchimento. Nunca dado de cliente nem de funcionário.",
+  "trechos": [
+    {
+      "texto": "cestaalianca@gmail.com",
+      "porque": "e-mail de acesso citado no leia-me (a senha não está escrita); o Gestor decide se tira"
+    },
+    {
+      "texto": "R$25/dia",
+      "porque": "regra de cálculo descrita no leia-me (valor do vale por dia trabalhado); o Gestor decide se o leia-me público deve citar valores"
+    }
+  ],
+  "tiposLiberados": {},
+  "arquivosLiberados": [
+    "templates/recibo-comissao-formal-template.xlsx"
+  ]
+}

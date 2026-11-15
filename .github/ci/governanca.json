@@ -1,0 +1,37 @@
+{
+  "_sobre": "Regras de governança deste repositório PÚBLICO (Painel de Funcionários), lidas pelos scripts de .github/ci (versão limpa, padrão das esteiras, saúde e limpeza). Mudar aqui é decisão do Gestor: explique no commit.",
+  "site": {
+    "obrigatorios": [
+      "index.html",
+      "app.js",
+      "calc.js"
+    ],
+    "tambem": [
+      "templates/recibo-comissao-formal-template.xlsx"
+    ]
+  },
+  "esteiras": {
+    "acoesPermitidas": [
+      "actions/"
+    ],
+    "producaoSoNoMain": [],
+    "segredoSemTravaDeMain": {}
+  },
+  "limpeza": {
+    "diasMinimos": 7,
+    "branchesProtegidas": [
+      "master"
+    ]
+  },
+  "saude": {
+    "falhasSeguidasAlerta": 2,
+    "agendadoSemRodarDias": 3,
+    "agendadoSemRodarPorArquivo": {
+      "saude.yml": 9
+    },
+    "branchParadaDias": 30,
+    "paginas": [
+      "https://cestaalianca-glitch.github.io/painel-funcionarios/"
+    ]
+  }
+}

@@ -1,0 +1,2 @@
+# Os ganchos do git são scripts de shell: precisam de fim de linha LF também no Windows (com CRLF o sh não roda).
+ganchos/* text eol=lf

@@ -1,0 +1,24 @@
+#!/bin/sh
+# GANCHO pre-commit (governança, 15/11/2026): antes de cada commit, roda a trava do repositório no que está PREPARADO para o commit.
+# Barra backup (.bak-*), segredo, sessão de WhatsApp, lista/CSV de cliente e dado sensível na linha pública.
+# Ligar nesta cópia do repositório:  node .github/ci/instalar-ganchos.js      Desligar:  node .github/ci/instalar-ganchos.js --desligar
+# Tudo certo: não imprime nada. Se a trava não conseguir rodar (sem node, erro interno), o commit é LIBERADO com aviso: a esteira do
+# GitHub confere de novo.
+RAIZ="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+TRAVA=""
+for t in conferir-repo.js conferir-publico.js; do [ -f "$RAIZ/.github/ci/$t" ] && TRAVA="$RAIZ/.github/ci/$t" && break; done
+[ -n "$TRAVA" ] || exit 0
+command -v node >/dev/null 2>&1 || { echo "aviso: node não encontrado; trava do commit pulada (a esteira do GitHub confere)" >&2; exit 0; }
+saida="$(node "$TRAVA" --indice 2>&1)"
+codigo=$?
+if [ "$codigo" = 1 ]; then
+  printf '%s\n' "$saida" >&2
+  echo "" >&2
+  echo "COMMIT BLOQUEADO pela trava do repositório (lista acima). Tire o arquivo do commit (git restore --staged <arquivo>) ou corrija e tente de novo." >&2
+  exit 1
+fi
+if [ "$codigo" != 0 ]; then
+  printf '%s\n' "$saida" >&2
+  echo "aviso: a trava não conseguiu rodar (código $codigo); commit liberado, a esteira do GitHub confere de novo" >&2
+fi
+exit 0
